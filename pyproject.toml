@@ -1,0 +1,27 @@
+[project]
+name = "job-hunter"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx",
+    "openpyxl>=3.1.5",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+vacancies = "hunter.corpus.cli:main"
+hunter = "hunter.run:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hunter"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

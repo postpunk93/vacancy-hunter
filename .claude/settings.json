@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "vacancies todo 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

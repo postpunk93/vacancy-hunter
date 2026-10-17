@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+config.yaml
+state.db
+logs/
+debug/
+exports/
+.pytest_cache/
+.superpowers/
+*.db
+state.db.bak*
+me/
+.claude/worktrees/
+.claude/settings.local.json

@@ -1,0 +1,37 @@
+# Скопируйте в config.yaml и правьте под себя.
+
+sources: [hh, zarplata]
+
+defaults:              # применяются к каждому запросу, если тот не переопределит
+  area: 113            # 1 = Москва, 2 = Санкт-Петербург, 113 = вся Россия
+  work_format: remote  # remote | hybrid | on_site | field_work
+  only_with_salary: false
+  search_period: 2     # дней, 1–30; перебивается флагом --days
+  max_pages: 2         # по 50 вакансий; на неполной странице листание останавливается
+
+# telegram: true   # дублировать сводку в Телеграм (нужен me/.env)
+
+queries:
+  # text уходит на hh как есть: он понимает AND, OR, NOT, кавычки
+  # и префикс NAME: для поиска только по заголовку вакансии.
+  # Порядок важен: вакансия, найденная несколькими запросами,
+  # показывается в блоке первого из них.
+  - name: "Python backend"
+    text: 'NAME:(python AND (backend OR бэкенд)) NOT NAME:(стажёр OR senior)'
+    salary: 200000
+    experience: [between1And3, between3And6]  # noExperience | between1And3 | between3And6 | moreThan6
+
+  - name: "Data Engineer"
+    text: '"data engineer"'
+    area: 1
+    experience: between3And6
+
+# Оценка вакансий Claude (Sonnet через Claude Code по подписке).
+# Без этой секции бот работает как раньше: без скачивания текстов и оценки.
+# Конфиг лежит в me/, рядом с ним — profile.md: «Кто я», «Что ищу» (роли,
+# «да» и «нет», общие рамки) и «Красные флаги» (тяжёлые и мягкие признаки).
+# scoring:
+#   enabled: true
+#   profile: profile.md   # относительный путь — от папки конфига; можно ~/...
+#   threshold: 5          # в Телеграм — оценка не ниже
+#   model: sonnet
