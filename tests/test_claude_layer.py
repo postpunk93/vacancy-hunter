@@ -68,3 +68,11 @@ def test_no_personal_paths_in_public_files():
             if needle in text:
                 found.append(f"{name}: {needle}")
     assert not found, found
+
+
+def test_apply_sample_marker_picks_one_letter():
+    """С двумя письмами в draft.md образец тона — только отмеченное письмо."""
+    text = (ROOT / ".claude/skills/apply/SKILL.md").read_text(encoding="utf-8")
+    opora = text.split("2. **Опора.**")[1].split("3. **Черновик.**")[0]
+    assert "(по книге)" in opora and "(по каркасу)" in opora
+    assert "без уточнения" in opora
