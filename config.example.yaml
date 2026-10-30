@@ -26,12 +26,11 @@ queries:
     area: 1
     experience: between3And6
 
-# Оценка вакансий Claude (Sonnet через Claude Code по подписке).
-# Без этой секции бот работает как раньше: без скачивания текстов и оценки.
-# Конфиг лежит в me/, рядом с ним — profile.md: «Кто я», «Что ищу» (роли,
-# «да» и «нет», общие рамки) и «Красные флаги» (тяжёлые и мягкие признаки).
+# Оценка вакансий моделью через OpenCode (по умолчанию) или Claude Code.
+# Без этой секции бот работает как раньше: без текстов и оценки.
 # scoring:
 #   enabled: true
-#   profile: profile.md   # относительный путь — от папки конфига; можно ~/...
-#   threshold: 5          # в Телеграм — оценка не ниже
-#   model: sonnet
+#   profile: profile.md
+#   threshold: 5
+#   backend: opencode          # opencode | claude
+#   model: opencode/big-pickle # для backend: claude — например, sonnet

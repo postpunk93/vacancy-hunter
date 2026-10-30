@@ -25,8 +25,11 @@ _QUERY_FIELDS = {
 
 MAX_PERIOD_DAYS = 30
 
-_SCORING_FIELDS = {"enabled", "profile", "threshold", "model"}
+_SCORING_FIELDS = {"enabled", "profile", "threshold", "backend", "model"}
 _OLD_SCORING_FIELDS = ("portrait", "conflict")
+
+_BACKENDS = ("opencode", "claude")
+_DEFAULT_MODELS = {"opencode": "opencode/big-pickle", "claude": "sonnet"}
 
 
 class ConfigError(Exception):
@@ -35,11 +38,12 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ScoringConfig:
-    """Оценка вакансий Claude: файл профиля и порог для Телеграма."""
+    """Оценка вакансий: файл профиля, порог для Телеграма, бэкенд и модель."""
 
     profile: Path
     threshold: int = 5
-    model: str = "sonnet"
+    backend: str = "opencode"
+    model: str = "opencode/big-pickle"
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,11 +162,17 @@ def _load_scoring(raw: object, base: Path) -> ScoringConfig | None:
     if isinstance(threshold, bool) or not isinstance(threshold, int) or not 1 <= threshold <= 10:
         raise ConfigError(f"scoring: threshold — число от 1 до 10, получено: {threshold!r}")
 
-    model = raw.get("model", "sonnet")
+    backend = raw.get("backend", "opencode")
+    if not isinstance(backend, str) or backend not in _BACKENDS:
+        raise ConfigError(
+            f"scoring: backend — opencode или claude, получено: {backend!r}"
+        )
+
+    model = raw.get("model", _DEFAULT_MODELS[backend])
     if not model or not isinstance(model, str):
         raise ConfigError(f"scoring: model — название модели, получено: {model!r}")
 
-    return ScoringConfig(profile=profile, threshold=threshold, model=model)
+    return ScoringConfig(profile=profile, threshold=threshold, backend=backend, model=model)
 
 
 def with_search_period(config: Config, days: int) -> Config:

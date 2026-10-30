@@ -247,7 +247,42 @@ def test_scoring_defaults(tmp_path):
     path = write(tmp_path, _QUERIES + "\nscoring:\n  profile: profile.md\n")
     scoring = load_config(path).scoring
     assert scoring.threshold == 5
-    assert scoring.model == "sonnet"
+    assert scoring.backend == "opencode"
+    assert scoring.model == "opencode/big-pickle"
+
+
+def test_scoring_claude_backend_defaults_to_sonnet(tmp_path):
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + """
+scoring:
+  profile: profile.md
+  backend: claude
+""")
+    assert load_config(path).scoring.model == "sonnet"
+
+
+def test_scoring_model_overrides_the_backend_default(tmp_path):
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + """
+scoring:
+  profile: profile.md
+  backend: claude
+  model: opus
+""")
+    assert load_config(path).scoring.model == "opus"
+
+
+def test_scoring_unknown_backend_rejected(tmp_path):
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + """
+scoring:
+  profile: profile.md
+  backend: gpt
+""")
+    with pytest.raises(ConfigError, match="backend") as info:
+        load_config(path)
+    assert "opencode" in str(info.value)
+    assert "claude" in str(info.value)
 
 
 @pytest.mark.parametrize("value", ["0", "11", '"5"', "true"])
@@ -271,7 +306,7 @@ scoring:
 """)
     with pytest.raises(ConfigError, match="treshold") as info:
         load_config(path)
-    for field in ("enabled", "profile", "threshold", "model"):
+    for field in ("enabled", "profile", "threshold", "model", "backend"):
         assert field in str(info.value)
 
 
