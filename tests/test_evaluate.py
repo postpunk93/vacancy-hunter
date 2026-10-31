@@ -10,7 +10,7 @@ from hunter.corpus.cli import main
 from hunter.corpus.store import _MIGRATIONS
 from hunter.evaluate import Report, evaluate, load_verdicts, rescore, vacancy_from_row
 from hunter.models import Score
-from hunter.scoring import ClaudeError, Criteria
+from hunter.scoring import ScoringError, Criteria
 from hunter.store import Store
 
 CRITERIA = Criteria(profile="ПРОФИЛЬ")
@@ -48,7 +48,7 @@ class Ask:
 
     def __call__(self, system, payload):
         if self.error:
-            raise ClaudeError(self.error)
+            raise ScoringError(self.error)
         items = json.loads(payload)
         return {"items": [
             {"id": item["id"], "score": self.scores[item["id"]], "why": "потому", "flags": []}
@@ -106,7 +106,7 @@ def test_unscored_are_counted_apart_from_agreement(tmp_path):
     assert report.misses == []
 
 
-def test_claude_down_leaves_everything_unscored_with_reason(tmp_path):
+def test_model_down_leaves_everything_unscored_with_reason(tmp_path):
     db = tmp_path / "old.db"
     old_database(db, [(1, "Автор", "yes", "текст")])
     report = evaluate(load_verdicts(db), ask=Ask(error="лимит"), criteria=CRITERIA, threshold=5)
@@ -228,11 +228,11 @@ def test_eval_with_missing_config_is_a_usage_error(setup, tmp_path, capsys):
     assert "не найден" in capsys.readouterr().err
 
 
-def test_eval_with_claude_down_prints_reason_and_exits_1(setup, monkeypatch, capsys):
+def test_eval_with_model_down_prints_reason_and_exits_1(setup, monkeypatch, capsys):
     db, config = setup
 
     def down(system, payload, *, model):
-        raise ClaudeError("лимит подписки")
+        raise ScoringError("лимит подписки")
 
     monkeypatch.setattr("hunter.corpus.cli.ask_claude", down)
     assert main(["eval", "--from", str(db), "--config", str(config)]) == 1
@@ -318,7 +318,7 @@ def test_rescore_caches_the_new_scores_under_the_new_criteria(tmp_path):
     assert (old, new.value) == (7, 7)
 
 
-def test_rescore_with_claude_down_leaves_scores_empty_with_reason(tmp_path):
+def test_rescore_with_model_down_leaves_scores_empty_with_reason(tmp_path):
     db = tmp_path / "me.db"
     cached_database(db, [(1, "Автор", 1, "текст", 4)])
     with Store(db) as store:
@@ -400,11 +400,11 @@ def test_rescore_never_touches_the_network_from_the_command_line(rescore_setup, 
     assert main(rescore_argv(db, config)) == 0
 
 
-def test_rescore_with_claude_down_exits_1_with_reason(rescore_setup, monkeypatch, capsys):
+def test_rescore_with_model_down_exits_1_with_reason(rescore_setup, monkeypatch, capsys):
     db, config, _ = rescore_setup
 
     def down(system, payload, *, model):
-        raise ClaudeError("лимит подписки")
+        raise ScoringError("лимит подписки")
 
     monkeypatch.setattr("hunter.corpus.cli.ask_claude", down)
     assert main(rescore_argv(db, config)) == 1

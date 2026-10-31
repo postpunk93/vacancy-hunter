@@ -31,8 +31,16 @@ _FLAG_LENGTH = 60
 Ask = Callable[[str, str], object]
 
 
-class ClaudeError(Exception):
-    """Claude не ответил или ответил не по схеме. Вакансии остаются без оценки."""
+class ScoringError(Exception):
+    """Модель не ответила или ответила не по схеме. Вакансии остаются без оценки.
+
+    retryable — стоит ли повторять запрос: таймаут или сбой запуска повторяем,
+    исчерпанную квоту или лимит — нет, вторая попытка только потратит время.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,23 +218,23 @@ def ask_claude(
             cwd=tempfile.gettempdir(),
         )
     except FileNotFoundError as exc:
-        raise ClaudeError("claude не найден — установлен ли Claude Code?") from exc
+        raise ScoringError("claude не найден — установлен ли Claude Code?") from exc
     except subprocess.TimeoutExpired as exc:
-        raise ClaudeError(f"claude не ответил за {timeout:.0f} с") from exc
+        raise ScoringError(f"claude не ответил за {timeout:.0f} с") from exc
     except OSError as exc:
-        raise ClaudeError(f"claude не запустился: {exc}") from exc
+        raise ScoringError(f"claude не запустился: {exc}") from exc
 
     try:
         out = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError):
         out = None
     if not isinstance(out, dict):
-        raise ClaudeError(
+        raise ScoringError(
             f"claude завершился с кодом {completed.returncode}: "
             + _excerpt(completed.stderr or completed.stdout or "", 300)
         )
     if completed.returncode != 0 or out.get("is_error"):
-        raise ClaudeError("claude вернул ошибку: " + _excerpt(str(out.get("result") or completed.stderr), 300))
+        raise ScoringError("claude вернул ошибку: " + _excerpt(str(out.get("result") or completed.stderr), 300))
 
     data = out.get("structured_output")
     if data is None:
@@ -235,7 +243,7 @@ def ask_claude(
         except json.JSONDecodeError:
             data = None
     if not isinstance(data, dict):
-        raise ClaudeError("claude не вернул структурированный ответ: " + _excerpt(str(out.get("result") or ""), 300))
+        raise ScoringError("claude не вернул структурированный ответ: " + _excerpt(str(out.get("result") or ""), 300))
     return data
 
 
@@ -243,10 +251,10 @@ def _ask_with_retry(ask: Ask, system: str, payload: str) -> object:
     for attempt in range(1, ATTEMPTS + 1):
         try:
             return ask(system, payload)
-        except ClaudeError as exc:
-            if attempt >= ATTEMPTS:
+        except ScoringError as exc:
+            if not exc.retryable or attempt >= ATTEMPTS:
                 raise
-            log.info("Повтор запроса к Claude: %s", exc)
+            log.info("Повтор запроса к модели: %s", exc)
     raise AssertionError("недостижимо")
 
 
@@ -280,8 +288,8 @@ def score_vacancies(
         )
         try:
             data = _ask_with_retry(ask, system, payload)
-        except ClaudeError as exc:
-            # Пачка не прошла и с повтором — Claude недоступен или завис.
+        except ScoringError as exc:
+            # Пачка не прошла и с повтором — модель недоступна или зависла.
             # Остальные пачки ждали бы по таймауту каждая: проход растянулся
             # бы на часы. Оставшиеся вакансии уходят без оценки.
             last_error = str(exc)
@@ -298,10 +306,10 @@ def score_vacancies(
                 score = Score(score.value, score.why, score.flags, from_card=True)
             scores[vacancy.key] = score
 
-    reason = last_error or "нет в ответе Claude"
+    reason = last_error or "нет в ответе модели"
     missing = [v for v in vacancies if v.key not in scores]
     for vacancy in missing:
-        scores[vacancy.key] = Score(None, f"Claude не оценил: {reason}")
+        scores[vacancy.key] = Score(None, f"модель не оценила: {reason}")
     if not missing:
         return scores, []
     log.warning("Не оценено вакансий: %d (%s)", len(missing), reason)

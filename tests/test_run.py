@@ -571,7 +571,7 @@ def test_below_threshold_stays_in_corpus_not_telegram():
 def test_unscored_and_card_scores_bypass_the_threshold():
     store = Store(":memory:")
     score = FakeScore({
-        "hh:1": Score(None, "Claude не оценил"),
+        "hh:1": Score(None, "модель не оценила"),
         "hh:2": Score(2, "по карточке", from_card=True),
     })
 

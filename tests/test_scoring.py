@@ -6,7 +6,7 @@ import pytest
 from hunter.models import FullText, Score
 from hunter.scoring import (
     DESCRIPTION_LIMIT,
-    ClaudeError,
+    ScoringError,
     Criteria,
     ask_claude,
     build_system_prompt,
@@ -40,7 +40,7 @@ class Ask:
         items = json.loads(payload)
         self.calls.append(items)
         if self.error:
-            raise ClaudeError(self.error)
+            raise ScoringError(self.error)
         return {"items": [
             {"id": item["id"], "score": self.score, "why": "подходит", "flags": ["ГПХ"]}
             for item in items if item["id"] not in self.skip
@@ -158,8 +158,8 @@ def _raise(exc):
     lambda args, **kw: _completed(json.dumps({"is_error": True, "result": "лимит"})),
     lambda args, **kw: _completed(json.dumps({"is_error": False, "result": "просто текст"})),
 ])
-def test_ask_claude_failures_raise_claude_error(run):
-    with pytest.raises(ClaudeError):
+def test_ask_claude_failures_raise_scoring_error(run):
+    with pytest.raises(ScoringError):
         ask_claude("s", "[]", model="sonnet", run=run)
 
 
@@ -185,6 +185,25 @@ def test_failed_batch_is_retried_once_then_left_unscored(store):
     assert all("boom" in s.why for s in scores.values())
     assert len(warnings) == 1
     assert "не оценено" in warnings[0] and "boom" in warnings[0]
+
+
+def test_non_retryable_error_is_not_retried(store):
+    vs = vacancies(1, 2)
+
+    class Quota:
+        calls = 0
+
+        def __call__(self, system, payload):
+            self.calls += 1
+            raise ScoringError("Free usage limit reached", retryable=False)
+
+    ask = Quota()
+    scores, warnings = score_vacancies(vs, _texts(vs), ask=ask, criteria=CRITERIA, store=store)
+
+    assert ask.calls == 1, "ошибку квоты не повторяем"
+    assert all(not s.scored for s in scores.values())
+    assert "Free usage limit" in scores["hh:1"].why
+    assert len(warnings) == 1
 
 
 def test_missing_id_in_answer_is_unscored_not_lost(store):
@@ -253,7 +272,7 @@ def test_failed_batch_stops_the_remaining_batches(store):
 
 
 def test_ask_claude_wraps_other_os_errors():
-    with pytest.raises(ClaudeError):
+    with pytest.raises(ScoringError):
         ask_claude("s", "[]", model="sonnet", run=_raise(PermissionError("claude")))
 
 
