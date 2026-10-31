@@ -287,6 +287,9 @@ def _cmd_rescore(args, fetch_page, sleep) -> int:
         print(exc, file=sys.stderr)
         return EXIT_USAGE
     threshold = config.scoring.threshold
+    if args.limit is not None and args.limit < 1:
+        print("--limit: число вакансий, от 1", file=sys.stderr)
+        return EXIT_USAGE
 
     # Store сам создаёт базу и мигрирует схему; пересчёт чужой пустой папки
     # не повод заводить там базу.
@@ -300,6 +303,7 @@ def _cmd_rescore(args, fetch_page, sleep) -> int:
                 ask=lambda system, payload: ask_model(system, payload, criteria=criteria),
                 criteria=criteria,
                 days=args.days,
+                limit=args.limit,
             )
     except sqlite3.DatabaseError as exc:
         print(f"Файл {args.db} не похож на базу vacancies ({exc})", file=sys.stderr)
@@ -430,6 +434,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("rescore", help="пересчитать оценки вакансий из базы по новым критериям, без сети")
     p.add_argument("--days", type=int, default=7,
                    help="только найденные за последние N дней (по умолчанию 7)")
+    p.add_argument("--limit", type=int, default=None,
+                   help="только N самых свежих вакансий (по умолчанию все)")
     p.add_argument("--config", type=Path, default=paths.config(),
                    help="конфиг с секцией scoring (по умолчанию me/config.yaml)")
     return parser

@@ -352,6 +352,23 @@ def test_rescore_with_model_down_leaves_scores_empty_with_reason(tmp_path):
     assert old == 4
     assert new.value is None and "лимит" in new.why
 
+def test_rescore_limit_keeps_the_newest_vacancies(tmp_path):
+    db = tmp_path / "me.db"
+    cached_database(db, [
+        (1, "Старее", 3, "текст", None),
+        (2, "Средняя", 2, "текст", None),
+        (3, "Свежая", 1, "текст", None),
+    ])
+    with Store(db) as store:
+        result = rescore(
+            store,
+            ask=Ask({"hh:1": 7, "hh:2": 7, "hh:3": 7}),
+            criteria=CRITERIA,
+            days=7,
+            limit=1,
+        )
+    assert [vacancy.vacancy_id for vacancy, _, _ in result] == ["3"]
+
 
 # --- vacancies rescore ---
 
@@ -435,6 +452,21 @@ def test_rescore_with_model_down_exits_1_with_reason(rescore_setup, monkeypatch,
     monkeypatch.setattr("hunter.corpus.cli.ask_model", down)
     assert main(rescore_argv(db, config)) == 1
     assert "лимит подписки" in capsys.readouterr().err
+
+
+def test_rescore_limit_prints_only_the_newest(rescore_setup, capsys):
+    db, config, fake = rescore_setup
+    fake({"hh:4": 9, "hh:5": 7})
+    assert main(rescore_argv(db, config, "--limit", "2")) == 0
+    out = capsys.readouterr().out
+    assert "Осталась" in out and "Сдвинулась" in out
+    assert "Поднялась" not in out and "Упала" not in out
+
+
+def test_rescore_rejects_non_positive_limit(rescore_setup, capsys):
+    db, config, _ = rescore_setup
+    assert main(rescore_argv(db, config, "--limit", "0")) == 2
+    assert "--limit" in capsys.readouterr().err
 
 
 def test_rescore_without_database_fails_and_creates_nothing(rescore_setup, tmp_path, capsys):

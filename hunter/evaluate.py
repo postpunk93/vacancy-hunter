@@ -151,12 +151,15 @@ def evaluate(
 
 
 def rescore(
-    store: Store, *, ask: Ask, criteria: Criteria, days: int
+    store: Store, *, ask: Ask, criteria: Criteria, days: int, limit: int | None = None
 ) -> list[tuple[Vacancy, int | None, Score]]:
     """Вакансии корпуса, найденные за days дней и с полным текстом, оценённые
     заново после правки критериев. Прежняя оценка — последняя в базе до
     пересчёта (None — вакансию не оценивали). Сеть не нужна: тексты берутся
-    из базы, а новые оценки ложатся в кеш под новым хешем критериев."""
+    из базы, а новые оценки ложатся в кеш под новым хешем критериев.
+
+    limit — только N самых свежих вакансий (хвост сортировки по дате находки):
+    так пилотная пачка не тянет за собой весь корпус."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     rows = store.corpus._conn.execute(
         "SELECT v.*, s.score AS old_score FROM vacancies v "
@@ -165,6 +168,10 @@ def rescore(
         "ORDER BY v.first_seen_at, v.id",
         (cutoff,),
     ).fetchall()
+    if limit is not None:
+        if limit < 1:
+            raise ValueError("limit должен быть положительным")
+        rows = rows[-limit:]
     vacancies = [vacancy_from_row(row) for row in rows]
     old = {vacancy.key: row["old_score"] for vacancy, row in zip(vacancies, rows)}
     texts = {}
