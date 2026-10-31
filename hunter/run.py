@@ -32,7 +32,7 @@ from .filters import (
 )
 from .models import Score, Vacancy
 from .parse import ParseError, parse_search_page
-from .scoring import Criteria, ask_claude, load_criteria, score_pass
+from .scoring import Criteria, ask_model, load_criteria, score_pass
 from .sources import build_url, hh_period
 from .store import Store
 from .telegram import TelegramError, send_messages
@@ -399,8 +399,8 @@ def main(argv: list[str] | None = None) -> int:
                             fetch_page=fetch_page,
                             store=store,
                             pause=time.sleep,
-                            ask=lambda system, payload: ask_claude(
-                                system, payload, model=criteria.model
+                            ask=lambda system, payload: ask_model(
+                                system, payload, criteria=criteria
                             ),
                             criteria=criteria,
                         )

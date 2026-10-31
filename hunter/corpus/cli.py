@@ -19,7 +19,7 @@ from ..evaluate import evaluate, load_verdicts, rescore
 from ..export import export_rows, write_xlsx
 from ..fetch import get_html, new_client
 from ..models import SearchQuery
-from ..scoring import ask_claude, load_criteria
+from ..scoring import ask_model, load_criteria
 from ..store import Store
 from .collect import FetchPage, collect, fetch_details
 from .funnel import FUNNEL_COLUMNS, funnel_rows, reminders
@@ -53,7 +53,7 @@ def parse_vacancy_ref(value: str) -> int:
 
 
 def _parse_refs(refs: list[str]) -> list[int]:
-    # Порядок сохраняем, повторы убираем: Claude может передать один id дважды.
+    # Порядок сохраняем, повторы убираем: модель может передать один id дважды.
     return list(dict.fromkeys(parse_vacancy_ref(ref) for ref in refs))
 
 
@@ -247,12 +247,12 @@ def _cmd_eval(args, fetch_page, sleep) -> int:
         return 1
     report = evaluate(
         items,
-        ask=lambda system, payload: ask_claude(system, payload, model=criteria.model),
+        ask=lambda system, payload: ask_model(system, payload, criteria=criteria),
         criteria=criteria,
         threshold=threshold,
     )
     if report.unscored == report.total:
-        print("Claude не оценил ни одной вакансии: " + "; ".join(report.warnings), file=sys.stderr)
+        print("модель не оценила ни одной вакансии: " + "; ".join(report.warnings), file=sys.stderr)
         return 1
 
     print(f"Всего: {report.total}, не оценено: {report.unscored}")
@@ -297,7 +297,7 @@ def _cmd_rescore(args, fetch_page, sleep) -> int:
         with Store(args.db) as store:
             result = rescore(
                 store,
-                ask=lambda system, payload: ask_claude(system, payload, model=criteria.model),
+                ask=lambda system, payload: ask_model(system, payload, criteria=criteria),
                 criteria=criteria,
                 days=args.days,
             )
@@ -308,11 +308,11 @@ def _cmd_rescore(args, fetch_page, sleep) -> int:
         print(f"Нечего пересчитывать: нет вакансий с полным текстом за {args.days} дн.")
         return 0
     if all(new.value is None for _, _, new in result):
-        print("Claude не оценил ни одной вакансии: " + result[0][2].why, file=sys.stderr)
+        print("модель не оценила ни одной вакансии: " + result[0][2].why, file=sys.stderr)
         return 1
 
     # Не оценённые сейчас вакансии в сравнение не входят ни с одной стороны:
-    # иначе частичный сбой Claude выглядел бы как падение оценок.
+    # иначе частичный сбой модели выглядел бы как падение оценок.
     unscored = [new.why for _, _, new in result if new.value is None]
     was = sum(
         old is not None and old >= threshold for _, old, new in result if new.value is not None
@@ -421,7 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path,
                    help="куда писать (по умолчанию me/exports/vacancies-ДАТА_ВРЕМЯ.xlsx)")
 
-    p = sub.add_parser("eval", help="сверить оценки Claude с вердиктами владельца в старой базе")
+    p = sub.add_parser("eval", help="сверить оценки модели с вердиктами владельца в старой базе")
     p.add_argument("--from", dest="source", type=Path, required=True, metavar="PATH",
                    help="база с вердиктами (читается только на чтение)")
     p.add_argument("--config", type=Path, default=paths.config(),
@@ -440,7 +440,7 @@ def main(argv: list[str] | None = None, *, fetch_page: FetchPage | None = None,
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
     # httpx пишет строку на каждый запрос — это шум в выводе, который читает
-    # Claude. Повторы и сбои из get_html (hunter.fetch) остаются видны.
+    # модели. Повторы и сбои из get_html (hunter.fetch) остаются видны.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
         return _COMMANDS[args.command](args, fetch_page, sleep)

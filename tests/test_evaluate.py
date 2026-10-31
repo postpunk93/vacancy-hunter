@@ -206,13 +206,39 @@ def setup(tmp_path, monkeypatch):
 def test_eval_prints_report(setup, monkeypatch, capsys):
     db, config = setup
     ask = Ask({"hh:1": 8, "hh:2": 7, "hh:3": 3})
-    monkeypatch.setattr("hunter.corpus.cli.ask_claude", lambda system, payload, *, model: ask(system, payload))
+    seen = {}
+
+    def fake(system, payload, *, criteria):
+        seen["backend"] = criteria.backend
+        return ask(system, payload)
+
+    monkeypatch.setattr("hunter.corpus.cli.ask_model", fake)
     assert main(["eval", "--from", str(db), "--config", str(config)]) == 0
     out = capsys.readouterr().out
     assert "Всего: 3" in out
     assert "yes: 8.0" in out and "no: 5.0" in out
     assert "Согласие с порогом 5: 2 из 3" in out
     assert "| 2 | Бэкенд | no | 7 | потому |" in out
+    assert seen["backend"] == "opencode"
+
+
+def test_eval_uses_claude_backend_from_config(setup, monkeypatch, capsys):
+    db, config = setup
+    config.write_text(
+        config.read_text(encoding="utf-8") + "  backend: claude\n  model: sonnet\n",
+        encoding="utf-8",
+    )
+    ask = Ask({"hh:1": 8, "hh:2": 7, "hh:3": 3})
+    seen = {}
+
+    def fake(system, payload, *, criteria):
+        seen["backend"] = criteria.backend
+        seen["model"] = criteria.model
+        return ask(system, payload)
+
+    monkeypatch.setattr("hunter.corpus.cli.ask_model", fake)
+    assert main(["eval", "--from", str(db), "--config", str(config)]) == 0
+    assert seen == {"backend": "claude", "model": "sonnet"}
 
 
 def test_eval_without_scoring_section_is_a_usage_error(setup, capsys):
@@ -231,10 +257,10 @@ def test_eval_with_missing_config_is_a_usage_error(setup, tmp_path, capsys):
 def test_eval_with_model_down_prints_reason_and_exits_1(setup, monkeypatch, capsys):
     db, config = setup
 
-    def down(system, payload, *, model):
+    def down(system, payload, *, criteria):
         raise ScoringError("лимит подписки")
 
-    monkeypatch.setattr("hunter.corpus.cli.ask_claude", down)
+    monkeypatch.setattr("hunter.corpus.cli.ask_model", down)
     assert main(["eval", "--from", str(db), "--config", str(config)]) == 1
     assert "лимит подписки" in capsys.readouterr().err
 
@@ -350,7 +376,7 @@ def rescore_setup(tmp_path, monkeypatch):
     def fake(scores):
         ask = Ask(scores)
         monkeypatch.setattr(
-            "hunter.corpus.cli.ask_claude", lambda system, payload, *, model: ask(system, payload)
+            "hunter.corpus.cli.ask_model", lambda system, payload, *, criteria: ask(system, payload)
         )
 
     return db, config, fake
@@ -403,10 +429,10 @@ def test_rescore_never_touches_the_network_from_the_command_line(rescore_setup, 
 def test_rescore_with_model_down_exits_1_with_reason(rescore_setup, monkeypatch, capsys):
     db, config, _ = rescore_setup
 
-    def down(system, payload, *, model):
+    def down(system, payload, *, criteria):
         raise ScoringError("лимит подписки")
 
-    monkeypatch.setattr("hunter.corpus.cli.ask_claude", down)
+    monkeypatch.setattr("hunter.corpus.cli.ask_model", down)
     assert main(rescore_argv(db, config)) == 1
     assert "лимит подписки" in capsys.readouterr().err
 
