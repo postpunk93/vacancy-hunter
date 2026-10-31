@@ -470,34 +470,44 @@ def score_vacancies(
     system = build_system_prompt(criteria)
     last_error: str | None = None
     for start in range(0, len(pending), BATCH_SIZE):
-        batch = pending[start:start + BATCH_SIZE]
-        payload = json.dumps(
-            [vacancy_payload(v, texts.get(v.key)) for v in batch], ensure_ascii=False
-        )
-        try:
-            data = _ask_with_retry(ask, system, payload)
-        except ScoringError as exc:
-            last_error = str(exc)
-            # Пачка не прошла и с повтором — модель недоступна или зависла.
-            # Остальные пачки ждали бы по таймауту каждая: проход растянулся
-            # бы на часы. Оставшиеся вакансии уходят без оценки.
-            if exc.abort_pass:
-                log.warning("Оценка прекращена, пачка не оценена: %s", exc)
-                break
-            # Пустой ответ модели — дешёвый сбой одной пачки: её вакансии
-            # останутся без оценки, но следующие пачки надо оценить.
-            log.warning("Пачка не оценена, иду дальше: %s", exc)
-            continue
-        parsed = parse_scores(data, [v.key for v in batch])
-        for vacancy in batch:
-            score = parsed.get(vacancy.key)
-            if score is None:
+        queue = [pending[start:start + BATCH_SIZE]]
+        stopped = False
+        while queue and not stopped:
+            batch = queue.pop(0)
+            payload = json.dumps(
+                [vacancy_payload(v, texts.get(v.key)) for v in batch], ensure_ascii=False
+            )
+            try:
+                data = _ask_with_retry(ask, system, payload)
+            except ScoringError as exc:
+                last_error = str(exc)
+                # Пачка не прошла и с повтором — модель недоступна или зависла.
+                # Остальные пачки ждали бы по таймауту каждая: проход растянулся
+                # бы на часы. Оставшиеся вакансии уходят без оценки.
+                if exc.abort_pass:
+                    log.warning("Оценка прекращена, пачка не оценена: %s", exc)
+                    stopped = True
+                elif len(batch) > 1:
+                    # Пустой ответ на десятку — дешёвый сбой этой пачки:
+                    # половинки проходят там, где десятка вернула пустоту.
+                    half = len(batch) // 2
+                    log.warning("Пачка из %d не прошла (%s), делю пополам", len(batch), exc)
+                    queue[:0] = [batch[:half], batch[half:]]
+                else:
+                    log.warning("Вакансия осталась без оценки: %s", exc)
                 continue
-            if vacancy.key in texts:
-                store.save_score(vacancy.key, digest, score)
-            else:
-                score = Score(score.value, score.why, score.flags, from_card=True)
-            scores[vacancy.key] = score
+            parsed = parse_scores(data, [v.key for v in batch])
+            for vacancy in batch:
+                score = parsed.get(vacancy.key)
+                if score is None:
+                    continue
+                if vacancy.key in texts:
+                    store.save_score(vacancy.key, digest, score)
+                else:
+                    score = Score(score.value, score.why, score.flags, from_card=True)
+                scores[vacancy.key] = score
+        if stopped:
+            break
 
     reason = last_error or "нет в ответе модели"
     missing = [v for v in vacancies if v.key not in scores]

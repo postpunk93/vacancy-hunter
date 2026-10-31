@@ -390,23 +390,42 @@ def test_non_retryable_error_is_not_retried(store):
     assert len(warnings) == 1
 
 
-def test_empty_answer_leaves_the_batch_unscored_and_continues(store):
-    vs = vacancies(*range(23))
-    real = Ask()
-
-    attempts = {"n": 0}
+def test_empty_answer_splits_the_batch(store):
+    """Десятка иногда возвращает пустоту, половинки проходят."""
+    vs = vacancies(*range(10))
+    calls = []
 
     def ask(system, payload):
-        attempts["n"] += 1
-        if attempts["n"] <= 2:  # обе попытки первой пачки
+        items = json.loads(payload)
+        calls.append(len(items))
+        if len(items) > 5:
             raise ScoringError("opencode не вернул ответ", abort_pass=False)
-        return real(system, payload)
+        return {"items": [
+            {"id": item["id"], "score": 7, "why": "подходит", "flags": []} for item in items
+        ]}
 
     scores, warnings = score_vacancies(vs, _texts(vs), ask=ask, criteria=CRITERIA, store=store)
 
-    assert len(real.calls) == 2, "первая пачка пропущена, следующие оценены"
-    assert all(not scores[f"hh:{i}"].scored for i in range(10))
-    assert all(scores[f"hh:{i}"].scored for i in range(10, 23))
+    assert calls == [10, 10, 5, 5], "десятку пробуем дважды, потом делим пополам"
+    assert all(s.scored for s in scores.values())
+    assert warnings == []
+
+
+def test_failed_single_vacancy_does_not_stop_the_pass(store):
+    vs = vacancies(*range(15))
+
+    def ask(system, payload):
+        items = json.loads(payload)
+        if any(item["id"] == "hh:0" for item in items):
+            raise ScoringError("opencode не вернул ответ", abort_pass=False)
+        return {"items": [
+            {"id": item["id"], "score": 7, "why": "подходит", "flags": []} for item in items
+        ]}
+
+    scores, warnings = score_vacancies(vs, _texts(vs), ask=ask, criteria=CRITERIA, store=store)
+
+    assert not scores["hh:0"].scored
+    assert all(scores[f"hh:{i}"].scored for i in range(1, 15))
     assert len(warnings) == 1
 
 
