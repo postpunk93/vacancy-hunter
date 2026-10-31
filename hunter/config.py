@@ -171,6 +171,11 @@ def _load_scoring(raw: object, base: Path) -> ScoringConfig | None:
     model = raw.get("model", _DEFAULT_MODELS[backend])
     if not model or not isinstance(model, str):
         raise ConfigError(f"scoring: model — название модели, получено: {model!r}")
+    if backend == "opencode" and "/" not in model:
+        raise ConfigError(
+            f"scoring: model {model!r} для backend opencode — в формате provider/model, "
+            "например opencode/big-pickle; для Claude поставьте backend: claude"
+        )
 
     return ScoringConfig(profile=profile, threshold=threshold, backend=backend, model=model)
 

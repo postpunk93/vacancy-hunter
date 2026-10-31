@@ -32,6 +32,15 @@ _FLAG_LENGTH = 60
 
 Ask = Callable[[str, str], object]
 
+# Признаки исчерпанной квоты в тексте ошибки бэкенда: такую ошибку не
+# повторяем, вторая попытка только потратит время.
+_QUOTA_MARKERS = ("usage limit", "quota", "limit reached", "credits")
+
+
+def _retryable(message: str) -> bool:
+    lowered = message.lower()
+    return not any(marker in lowered for marker in _QUOTA_MARKERS)
+
 
 class ScoringError(Exception):
     """Модель не ответила или ответила не по схеме. Вакансии остаются без оценки.
@@ -236,12 +245,16 @@ def ask_claude(
     except (json.JSONDecodeError, TypeError):
         out = None
     if not isinstance(out, dict):
-        raise ScoringError(
+        message = (
             f"claude завершился с кодом {completed.returncode}: "
             + _excerpt(completed.stderr or completed.stdout or "", 300)
         )
+        raise ScoringError(message, retryable=_retryable(message))
     if completed.returncode != 0 or out.get("is_error"):
-        raise ScoringError("claude вернул ошибку: " + _excerpt(str(out.get("result") or completed.stderr), 300))
+        message = "claude вернул ошибку: " + _excerpt(
+            str(out.get("result") or completed.stderr), 300
+        )
+        raise ScoringError(message, retryable=_retryable(message))
 
     data = out.get("structured_output")
     if data is None:
@@ -332,12 +345,7 @@ def _parse_opencode(completed: subprocess.CompletedProcess) -> object:
                 retry_after = error["data"].get("retryAfterMs")
             if isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool):
                 message += f" (повтор через ~{retry_after / 3_600_000:.1f} ч)"
-            lowered = message.lower()
-            retryable = not any(
-                token in lowered
-                for token in ("usage limit", "quota", "limit reached", "credits")
-            )
-            event_error = ScoringError(message, retryable=retryable)
+            event_error = ScoringError(message, retryable=_retryable(message))
 
     if event_error is not None:
         raise event_error

@@ -300,6 +300,37 @@ def test_ask_model_dispatches_by_backend(monkeypatch):
     assert opencode["items"][0]["score"] == 3
 
 
+def test_ask_claude_quota_error_is_not_retryable():
+    def run(args, **kwargs):
+        return _completed(json.dumps({"is_error": True, "result": "Claude usage limit reached"}))
+
+    with pytest.raises(ScoringError) as caught:
+        ask_claude("s", "[]", model="sonnet", run=run)
+    assert caught.value.retryable is False
+
+
+def test_claude_quota_error_is_not_retried(store):
+    vs = vacancies(1, 2)
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return _completed(json.dumps({"is_error": True, "result": "Claude usage limit reached"}))
+
+    scores, warnings = score_vacancies(
+        vs,
+        _texts(vs),
+        ask=lambda system, payload: ask_claude(system, payload, model="sonnet", run=run),
+        criteria=CRITERIA,
+        store=store,
+    )
+
+    assert len(calls) == 1, "ошибку квоты не повторяем"
+    assert all(not s.scored for s in scores.values())
+    assert "usage limit" in scores["hh:1"].why
+    assert len(warnings) == 1
+
+
 def _texts(vs):
     return {v.key: FullText("текст", ()) for v in vs}
 

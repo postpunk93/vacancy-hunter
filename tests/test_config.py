@@ -285,6 +285,32 @@ scoring:
     assert "claude" in str(info.value)
 
 
+def test_scoring_opencode_backend_rejects_a_claude_model_name(tmp_path):
+    """Старый конфиг с model: sonnet и без backend иначе уйдёт в OpenCode
+    с несуществующей моделью и упадёт уже на первом запросе."""
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + """
+scoring:
+  profile: profile.md
+  model: sonnet
+""")
+    with pytest.raises(ConfigError) as caught:
+        load_config(path)
+    message = str(caught.value)
+    assert "backend" in message and "opencode/big-pickle" in message
+
+
+def test_scoring_claude_backend_accepts_a_bare_model_name(tmp_path):
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + """
+scoring:
+  profile: profile.md
+  backend: claude
+  model: sonnet
+""")
+    assert load_config(path).scoring.model == "sonnet"
+
+
 @pytest.mark.parametrize("value", ["0", "11", '"5"', "true"])
 def test_scoring_threshold_must_be_1_to_10(tmp_path, value):
     _profile(tmp_path)
