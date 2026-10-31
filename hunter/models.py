@@ -63,7 +63,7 @@ class FullText:
 
 @dataclass(frozen=True, slots=True)
 class Score:
-    """Оценка вакансии Claude. value=None — оценить не удалось, причина в why.
+    """Оценка вакансии моделью. value=None — оценить не удалось, причина в why.
     from_card — текст не скачался, оценка по одной карточке из выдачи."""
 
     value: int | None
