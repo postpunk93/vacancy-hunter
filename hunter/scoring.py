@@ -48,11 +48,16 @@ class ScoringError(Exception):
 
     retryable — стоит ли повторять запрос: таймаут или сбой запуска повторяем,
     исчерпанную квоту или лимит — нет, вторая попытка только потратит время.
+
+    abort_pass — обрывать ли весь проход: таймаут, падение CLI и квота значат,
+    что следующие пачки тоже не пройдут. Пустой или неJSON ответ — сбой одной
+    пачки, остальные надо оценить.
     """
 
-    def __init__(self, message: str, *, retryable: bool = True):
+    def __init__(self, message: str, *, retryable: bool = True, abort_pass: bool = True):
         super().__init__(message)
         self.retryable = retryable
+        self.abort_pass = abort_pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,11 +365,15 @@ def _parse_opencode(completed: subprocess.CompletedProcess) -> object:
 
     text = "".join(texts).strip()
     if not text:
-        raise ScoringError("opencode не вернул ответ: " + _excerpt(completed.stderr or "", 300))
+        raise ScoringError(
+            "opencode не вернул ответ: " + _excerpt(completed.stderr or "", 300),
+            abort_pass=False,
+        )
     data = _extract_json_object(text)
     if data is None:
         raise ScoringError(
-            "opencode не вернул структурированный ответ: " + _excerpt(text, 300)
+            "opencode не вернул структурированный ответ: " + _excerpt(text, 300),
+            abort_pass=False,
         )
     return data
 
@@ -468,12 +477,17 @@ def score_vacancies(
         try:
             data = _ask_with_retry(ask, system, payload)
         except ScoringError as exc:
+            last_error = str(exc)
             # Пачка не прошла и с повтором — модель недоступна или зависла.
             # Остальные пачки ждали бы по таймауту каждая: проход растянулся
             # бы на часы. Оставшиеся вакансии уходят без оценки.
-            last_error = str(exc)
-            log.warning("Оценка прекращена, пачка не оценена: %s", exc)
-            break
+            if exc.abort_pass:
+                log.warning("Оценка прекращена, пачка не оценена: %s", exc)
+                break
+            # Пустой ответ модели — дешёвый сбой одной пачки: её вакансии
+            # останутся без оценки, но следующие пачки надо оценить.
+            log.warning("Пачка не оценена, иду дальше: %s", exc)
+            continue
         parsed = parse_scores(data, [v.key for v in batch])
         for vacancy in batch:
             score = parsed.get(vacancy.key)

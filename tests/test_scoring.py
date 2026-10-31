@@ -279,6 +279,21 @@ def test_ask_opencode_failures_raise_scoring_error(run):
         ask_opencode("s", "[]", model="opencode/big-pickle", run=run)
 
 
+@pytest.mark.parametrize("run, abort", [
+    (_raise(FileNotFoundError("opencode")), True),
+    (_raise(subprocess.TimeoutExpired(["opencode"], 600)), True),
+    (lambda args, **kw: _completed(""), False),
+    (lambda args, **kw: _completed(_events(_text_event("просто текст"))), False),
+    (lambda args, **kw: _completed("", returncode=1, stderr="boom"), True),
+])
+def test_ask_opencode_marks_fast_failures_as_non_fatal(run, abort):
+    """Пустой или неJSON ответ — сбой модели в одной пачке: остальные
+    пачки всё равно надо оценить. Таймаут и падение CLI — стоп."""
+    with pytest.raises(ScoringError) as caught:
+        ask_opencode("s", "[]", model="opencode/big-pickle", run=run)
+    assert caught.value.abort_pass is abort
+
+
 def test_ask_model_dispatches_by_backend(monkeypatch):
     calls = []
 
@@ -372,6 +387,26 @@ def test_non_retryable_error_is_not_retried(store):
     assert ask.calls == 1, "ошибку квоты не повторяем"
     assert all(not s.scored for s in scores.values())
     assert "Free usage limit" in scores["hh:1"].why
+    assert len(warnings) == 1
+
+
+def test_empty_answer_leaves_the_batch_unscored_and_continues(store):
+    vs = vacancies(*range(23))
+    real = Ask()
+
+    attempts = {"n": 0}
+
+    def ask(system, payload):
+        attempts["n"] += 1
+        if attempts["n"] <= 2:  # обе попытки первой пачки
+            raise ScoringError("opencode не вернул ответ", abort_pass=False)
+        return real(system, payload)
+
+    scores, warnings = score_vacancies(vs, _texts(vs), ask=ask, criteria=CRITERIA, store=store)
+
+    assert len(real.calls) == 2, "первая пачка пропущена, следующие оценены"
+    assert all(not scores[f"hh:{i}"].scored for i in range(10))
+    assert all(scores[f"hh:{i}"].scored for i in range(10, 23))
     assert len(warnings) == 1
 
 
