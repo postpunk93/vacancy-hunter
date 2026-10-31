@@ -6,6 +6,7 @@ import logging
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from .config import ConfigError, ScoringConfig
@@ -21,7 +22,8 @@ log = logging.getLogger(__name__)
 PROMPT_VERSION = 2
 BATCH_SIZE = 10
 DESCRIPTION_LIMIT = 6000
-CLAUDE_TIMEOUT = 600
+MODEL_TIMEOUT = 600
+OPENCODE_AGENT = "vacancy-scorer"
 ATTEMPTS = 2
 
 _WHY_LIMIT = 300
@@ -48,12 +50,17 @@ class Criteria:
     """Текст profile.md: правится владельцем, код его не разбирает."""
 
     profile: str
-    model: str = "sonnet"
+    model: str = "opencode/big-pickle"
+    backend: str = "opencode"
 
 
 def load_criteria(cfg: ScoringConfig) -> Criteria:
     try:
-        return Criteria(profile=cfg.profile.read_text(encoding="utf-8"), model=cfg.model)
+        return Criteria(
+            profile=cfg.profile.read_text(encoding="utf-8"),
+            model=cfg.model,
+            backend=cfg.backend,
+        )
     except (OSError, UnicodeDecodeError) as exc:
         raise ConfigError(f"scoring: не удалось прочитать файл профиля: {exc}") from exc
 
@@ -62,7 +69,7 @@ def criteria_hash(criteria: Criteria) -> str:
     """Всё, от чего зависит оценка: после любой правки старые оценки не годятся."""
     digest = hashlib.sha256()
     parts = (
-        str(PROMPT_VERSION), criteria.model, _PROMPT,
+        str(PROMPT_VERSION), criteria.model, criteria.backend, _PROMPT,
         json.dumps(SCHEMA, sort_keys=True), criteria.profile,
     )
     for part in parts:
@@ -190,7 +197,7 @@ def ask_claude(
     payload: str,
     *,
     model: str,
-    timeout: float = CLAUDE_TIMEOUT,
+    timeout: float = MODEL_TIMEOUT,
     run=subprocess.run,
 ) -> object:
     """Claude Code в неинтерактивном режиме на подписке владельца. --bare не
@@ -245,6 +252,162 @@ def ask_claude(
     if not isinstance(data, dict):
         raise ScoringError("claude не вернул структурированный ответ: " + _excerpt(str(out.get("result") or ""), 300))
     return data
+
+
+def _opencode_config(system: str) -> dict:
+    """Конфиг агента во временной папке: свой системный промпт, один шаг,
+    все инструменты запрещены — оценка не должна трогать файлы и сеть."""
+    return {
+        "$schema": "https://opencode.ai/config.json",
+        "agents": {
+            OPENCODE_AGENT: {
+                "mode": "primary",
+                "hidden": True,
+                "system": system,
+                "steps": 1,
+                "permissions": [{"action": "*", "resource": "*", "effect": "deny"}],
+            }
+        },
+    }
+
+
+def _extract_json_object(text: str) -> dict | None:
+    """Снять markdown-обёртку и достать JSON из ответа модели.
+
+    Массив оценок без обёртки приводим к той же форме, что и {"items": [...]}.
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 2 and lines[-1].strip().startswith("```"):
+            text = "\n".join(lines[1:-1]).strip()
+
+    candidates = [text]
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start:end + 1])
+    start, end = text.find("["), text.rfind("]")
+    if start != -1 and end > start:
+        candidates.append(text[start:end + 1])
+
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            return {"items": data}
+    return None
+
+
+def _parse_opencode(completed: subprocess.CompletedProcess) -> object:
+    """JSONL-события OpenCode → ответ модели. Битые строки пропускаем:
+    из-за одной нечитаемой строки пачка не должна остаться без оценки."""
+    texts: list[str] = []
+    event_error: ScoringError | None = None
+    for line in (completed.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        if kind == "text":
+            part = event.get("part")
+            text = part.get("text") if isinstance(part, dict) else None
+            if isinstance(text, str):
+                texts.append(text)
+        elif kind == "error" and event_error is None:
+            error = event.get("error")
+            error = error if isinstance(error, dict) else {}
+            message = str(error.get("message") or error.get("type") or "неизвестная ошибка")
+            retry_after = error.get("retryAfterMs")
+            if retry_after is None and isinstance(error.get("data"), dict):
+                retry_after = error["data"].get("retryAfterMs")
+            if isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool):
+                message += f" (повтор через ~{retry_after / 3_600_000:.1f} ч)"
+            lowered = message.lower()
+            retryable = not any(
+                token in lowered
+                for token in ("usage limit", "quota", "limit reached", "credits")
+            )
+            event_error = ScoringError(message, retryable=retryable)
+
+    if event_error is not None:
+        raise event_error
+    if completed.returncode != 0:
+        detail = completed.stderr or completed.stdout or ""
+        raise ScoringError(
+            f"opencode завершился с кодом {completed.returncode}: " + _excerpt(detail, 300)
+        )
+
+    text = "".join(texts).strip()
+    if not text:
+        raise ScoringError("opencode не вернул ответ: " + _excerpt(completed.stderr or "", 300))
+    data = _extract_json_object(text)
+    if data is None:
+        raise ScoringError(
+            "opencode не вернул структурированный ответ: " + _excerpt(text, 300)
+        )
+    return data
+
+
+def ask_opencode(
+    system: str,
+    payload: str,
+    *,
+    model: str,
+    timeout: float = MODEL_TIMEOUT,
+    run=subprocess.run,
+) -> object:
+    """OpenCode CLI во временной папке со своим конфигом агента. Инструменты
+    запрещены конфигом, поэтому ответ — только текст с JSON-массивом оценок."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="hunter-scorer-") as workdir:
+            Path(workdir, "opencode.json").write_text(
+                json.dumps(_opencode_config(system), ensure_ascii=False), encoding="utf-8"
+            )
+            command = [
+                "opencode", "run", "--agent", OPENCODE_AGENT,
+                "--model", model, "--format", "json",
+            ]
+            completed = run(
+                command,
+                input=payload,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=timeout,
+                cwd=workdir,
+            )
+            return _parse_opencode(completed)
+    except FileNotFoundError as exc:
+        raise ScoringError("opencode не найден — установлен ли OpenCode?") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ScoringError(f"opencode не ответил за {timeout:.0f} с") from exc
+    except OSError as exc:
+        raise ScoringError(f"opencode не запустился: {exc}") from exc
+
+
+def ask_model(
+    system: str,
+    payload: str,
+    *,
+    criteria: Criteria,
+    run=subprocess.run,
+) -> object:
+    """Один вопрос модели, бэкенд — из конфига владельца."""
+    if criteria.backend == "claude":
+        return ask_claude(system, payload, model=criteria.model, run=run)
+    if criteria.backend == "opencode":
+        return ask_opencode(system, payload, model=criteria.model, run=run)
+    raise ValueError(f"scoring: неизвестный бэкенд: {criteria.backend!r}")
 
 
 def _ask_with_retry(ask: Ask, system: str, payload: str) -> object:

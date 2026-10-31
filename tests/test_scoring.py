@@ -1,16 +1,20 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from hunter.models import FullText, Score
 from hunter.scoring import (
     DESCRIPTION_LIMIT,
-    ScoringError,
     Criteria,
+    ScoringError,
     ask_claude,
+    ask_model,
+    ask_opencode,
     build_system_prompt,
     criteria_hash,
+    load_criteria,
     parse_scores,
     score_pass,
     score_vacancies,
@@ -161,6 +165,139 @@ def _raise(exc):
 def test_ask_claude_failures_raise_scoring_error(run):
     with pytest.raises(ScoringError):
         ask_claude("s", "[]", model="sonnet", run=run)
+
+
+def test_criteria_hash_depends_on_the_backend():
+    claude = Criteria(CRITERIA.profile, model="sonnet", backend="claude")
+    opencode = Criteria(CRITERIA.profile, model="sonnet", backend="opencode")
+    assert criteria_hash(claude) != criteria_hash(opencode)
+
+
+def test_load_criteria_carries_backend(tmp_path):
+    from hunter.config import ScoringConfig
+
+    profile = tmp_path / "p.md"
+    profile.write_text("## Что ищу\nавтор", encoding="utf-8")
+    criteria = load_criteria(
+        ScoringConfig(profile=profile, backend="claude", model="sonnet")
+    )
+    assert criteria.backend == "claude"
+
+
+def _events(*items):
+    return "\n".join(json.dumps(item, ensure_ascii=False) for item in items) + "\n"
+
+
+def _text_event(text):
+    return {"type": "text", "part": {"text": text}}
+
+
+def test_ask_opencode_builds_the_documented_command_and_agent_config():
+    seen = {}
+    config = {}
+
+    def run(args, **kwargs):
+        seen["args"] = args
+        seen.update(kwargs)
+        workdir = Path(kwargs["cwd"])
+        config.update(json.loads((workdir / "opencode.json").read_text(encoding="utf-8")))
+        seen["workdir"] = workdir
+        return _completed(_events(_text_event('{"items": []}')))
+
+    ask_opencode("система", "[]", model="opencode/big-pickle", run=run)
+
+    assert seen["args"] == [
+        "opencode", "run", "--agent", "vacancy-scorer",
+        "--model", "opencode/big-pickle", "--format", "json",
+    ]
+    assert seen["input"] == "[]"
+    agent = config["agents"]["vacancy-scorer"]
+    assert agent["system"] == "система"
+    assert agent["mode"] == "primary"
+    assert agent["steps"] == 1
+    assert agent["hidden"] is True
+    assert agent["permissions"] == [{"action": "*", "resource": "*", "effect": "deny"}]
+    assert not seen["workdir"].exists(), "временная папка удаляется после вызова"
+
+
+def test_ask_opencode_joins_text_events_and_strips_fences():
+    def run(args, **kwargs):
+        return _completed(_events(
+            _text_event('```json\n{"items": ['),
+            _text_event(']}\n```'),
+        ))
+
+    assert ask_opencode("s", "[]", model="opencode/big-pickle", run=run) == {"items": []}
+
+
+def test_ask_opencode_ignores_broken_jsonl_lines():
+    def run(args, **kwargs):
+        return _completed(
+            json.dumps(_text_event('{"items": [')) + "\nне json\n"
+            + json.dumps(_text_event("]}")) + "\n"
+        )
+
+    assert ask_opencode("s", "[]", model="opencode/big-pickle", run=run) == {"items": []}
+
+
+def test_ask_opencode_accepts_a_bare_array():
+    def run(args, **kwargs):
+        return _completed(_events(
+            _text_event('[{"id": "hh:1", "score": 7, "why": "x", "flags": []}]'),
+        ))
+
+    assert ask_opencode("s", "[]", model="opencode/big-pickle", run=run) == {
+        "items": [{"id": "hh:1", "score": 7, "why": "x", "flags": []}]
+    }
+
+
+def test_ask_opencode_error_event_raises_scoring_error():
+    def run(args, **kwargs):
+        return _completed(_events({
+            "type": "error",
+            "error": {"message": "Free usage limit reached", "retryAfterMs": 16_200_000},
+        }))
+
+    with pytest.raises(ScoringError) as caught:
+        ask_opencode("s", "[]", model="opencode/big-pickle", run=run)
+    assert caught.value.retryable is False
+    assert "Free usage limit" in str(caught.value)
+    assert "повтор через" in str(caught.value)
+
+
+@pytest.mark.parametrize("run", [
+    _raise(FileNotFoundError("opencode")),
+    _raise(subprocess.TimeoutExpired(["opencode"], 600)),
+    lambda args, **kw: _completed(""),
+    lambda args, **kw: _completed(_events(_text_event("не json"))),
+    lambda args, **kw: _completed(_events(_text_event("просто текст"))),
+    lambda args, **kw: _completed("", returncode=1, stderr="boom"),
+])
+def test_ask_opencode_failures_raise_scoring_error(run):
+    with pytest.raises(ScoringError):
+        ask_opencode("s", "[]", model="opencode/big-pickle", run=run)
+
+
+def test_ask_model_dispatches_by_backend(monkeypatch):
+    calls = []
+
+    def fake_claude(system, payload, *, model, run):
+        calls.append(("claude", model))
+        return {"items": [{"id": "hh:1", "score": 9, "why": "c", "flags": []}]}
+
+    def fake_opencode(system, payload, *, model, run):
+        calls.append(("opencode", model))
+        return {"items": [{"id": "hh:1", "score": 3, "why": "o", "flags": []}]}
+
+    monkeypatch.setattr("hunter.scoring.ask_claude", fake_claude)
+    monkeypatch.setattr("hunter.scoring.ask_opencode", fake_opencode)
+
+    claude = ask_model("s", "[]", criteria=Criteria(CRITERIA.profile, model="sonnet", backend="claude"))
+    opencode = ask_model("s", "[]", criteria=Criteria(CRITERIA.profile, model="opencode/big-pickle"))
+
+    assert calls == [("claude", "sonnet"), ("opencode", "opencode/big-pickle")]
+    assert claude["items"][0]["score"] == 9
+    assert opencode["items"][0]["score"] == 3
 
 
 def _texts(vs):
