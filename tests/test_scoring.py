@@ -217,6 +217,7 @@ def test_ask_opencode_builds_the_documented_command_and_agent_config():
     assert agent["steps"] == 1
     assert agent["hidden"] is True
     assert agent["permissions"] == [{"action": "*", "resource": "*", "effect": "deny"}]
+    assert seen["env"]["PWD"] == str(seen["workdir"]), "OpenCode ищет конфиг по PWD"
     assert not seen["workdir"].exists(), "временная папка удаляется после вызова"
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -269,7 +270,9 @@ def ask_claude(
 
 def _opencode_config(system: str) -> dict:
     """Конфиг агента во временной папке: свой системный промпт, один шаг,
-    все инструменты запрещены — оценка не должна трогать файлы и сеть."""
+    все инструменты запрещены — оценка не должна трогать файлы и сеть.
+
+    """
     return {
         "$schema": "https://opencode.ai/config.json",
         "agents": {
@@ -375,7 +378,11 @@ def ask_opencode(
     run=subprocess.run,
 ) -> object:
     """OpenCode CLI во временной папке со своим конфигом агента. Инструменты
-    запрещены конфигом, поэтому ответ — только текст с JSON-массивом оценок."""
+    запрещены конфигом, поэтому ответ — только текст с JSON-массивом оценок.
+
+    PWD выставляем руками: `subprocess(cwd=...)` не меняет переменную
+    окружения, а OpenCode ищет проектный `opencode.json` именно по `$PWD`.
+    Без этого агент `vacancy-scorer` не находится."""
     try:
         with tempfile.TemporaryDirectory(prefix="hunter-scorer-") as workdir:
             Path(workdir, "opencode.json").write_text(
@@ -393,6 +400,7 @@ def ask_opencode(
                 encoding="utf-8",
                 timeout=timeout,
                 cwd=workdir,
+                env={**os.environ, "PWD": workdir},
             )
             return _parse_opencode(completed)
     except FileNotFoundError as exc:
