@@ -1052,3 +1052,45 @@ def test_pass_never_writes_xlsx(tmp_path, monkeypatch, clean_root_logger):
 def test_export_dir_flag_is_gone():
     with pytest.raises(SystemExit):
         run_module.build_parser().parse_args(["--export-dir", "x"])
+
+
+def test_two_queries_of_one_role_make_one_digest_block():
+    store = Store(":memory:")
+    config = Config(sources=("hh",), queries=(
+        SearchQuery(name="Автор (удалёнка)", role="author", text="python"),
+        SearchQuery(name="Автор (текст)", role="author", text="python remote"),
+    ))
+    sender = Sender()
+
+    code = run_pass(
+        config=config,
+        store=store,
+        fetch_page=lambda url: _scored_page(1, 2),
+        send=sender,
+        now=NOW,
+        pause=no_pause,
+    )
+
+    text = "\n".join(sender.messages)
+    assert code == 0
+    assert text.count("<b>author</b>") == 1
+    assert "Автор (удалёнка)" not in text
+
+
+def test_hits_record_the_role_not_the_query_name():
+    store = Store(":memory:")
+    config = Config(sources=("hh",), queries=(
+        SearchQuery(name="Промо", role="promo", text="smm"),
+    ))
+
+    run_pass(
+        config=config,
+        store=store,
+        fetch_page=lambda url: _scored_page(1),
+        send=Sender(),
+        now=NOW,
+        pause=no_pause,
+    )
+
+    rows = store.corpus._conn.execute("SELECT role, query FROM hits").fetchall()
+    assert [tuple(row) for row in rows] == [("promo", "smm")]

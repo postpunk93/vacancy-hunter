@@ -359,3 +359,53 @@ def test_telegram_must_be_boolean(tmp_path, value):
 def test_missing_file_points_to_setup(tmp_path):
     with pytest.raises(ConfigError, match="пройдите настройку"):
         load_config(tmp_path / "nope.yaml")
+
+
+def test_role_defaults_to_query_name(tmp_path):
+    path = write(tmp_path, """
+sources: [hh]
+queries:
+  - name: "Автор"
+    text: "редактор"
+""")
+
+    assert load_config(path).queries[0].role == "Автор"
+
+
+def test_explicit_role_is_kept(tmp_path):
+    path = write(tmp_path, """
+sources: [hh]
+queries:
+  - name: "Автор (удалёнка)"
+    role: author
+    text: "редактор"
+""")
+
+    assert load_config(path).queries[0].role == "author"
+
+
+def test_role_must_be_a_string(tmp_path):
+    path = write(tmp_path, """
+sources: [hh]
+queries:
+  - name: "Автор"
+    role: 42
+    text: "редактор"
+""")
+
+    with pytest.raises(ConfigError, match="role"):
+        load_config(path)
+
+
+def test_empty_role_is_an_error(tmp_path):
+    path = write(tmp_path, """
+sources: [hh]
+queries:
+  - name: "Автор"
+    role: "  "
+    text: "редактор"
+""")
+
+    with pytest.raises(ConfigError, match="role"):
+        load_config(path)
+

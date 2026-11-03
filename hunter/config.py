@@ -13,6 +13,7 @@ KNOWN_SOURCES = ("hh", "zarplata")
 _QUERY_FIELDS = {
     "name",
     "text",
+    "role",
     "area",
     "salary",
     "experience",
@@ -95,6 +96,13 @@ def load_config(path: Path) -> Config:
         for required in ("name", "text"):
             if not merged.get(required):
                 raise ConfigError(f"Запрос №{number}: не заполнено поле {required}")
+
+        role = merged.get("role", merged["name"])
+        if not isinstance(role, str) or not role.strip():
+            raise ConfigError(
+                f"Запрос №{number}: role — непустая строка, получено: {role!r}"
+            )
+        merged["role"] = role
 
         experience = merged.get("experience")
         if experience is None:

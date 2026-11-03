@@ -30,7 +30,7 @@ from .filters import (
     sort_by_freshness,
     sort_by_score,
 )
-from .models import Score, Vacancy
+from .models import Score, SearchQuery, Vacancy
 from .parse import ParseError, parse_search_page
 from .scoring import Criteria, ask_model, load_criteria, score_pass
 from .sources import build_url, hh_period
@@ -194,7 +194,8 @@ def run_pass(
     if not dry_run:
         # Корпус пополняется до отправки: сбой Телеграма вакансии не теряет,
         # а повторный проход ничего не задвоит (note_seen и add_hit идемпотентны).
-        _note_in_corpus(store, fresh, {q.name: q.text for q in config.queries})
+        _note_in_corpus(store, fresh, {q.name: q for q in config.queries})
+    fresh = _merge_by_role(fresh, config.queries)
 
     log.info(
         "Проход завершён: запросов %d, новых вакансий %d, предупреждений %d",
@@ -262,13 +263,28 @@ def run_pass(
     return EXIT_OK
 
 
-def _note_in_corpus(store: Store, fresh: list[Group], query_texts: dict[str, str]) -> None:
-    """Каждая новая вакансия — в vacancies, а запрос, по которому она нашлась, — в hits."""
+def _merge_by_role(groups: list[Group], queries: tuple[SearchQuery, ...]) -> list[Group]:
+    """У роли два запроса — обычный и текстовый про удалёнку. В дайджесте
+    должен быть один блок, поэтому группы склеиваются по роли."""
+    role_by_name = {q.name: q.role for q in queries}
+    order = list(dict.fromkeys(q.role for q in queries))
+    by_role: dict[str, list[Vacancy]] = {role: [] for role in order}
+    for name, vacancies in groups:
+        by_role[role_by_name[name]].extend(vacancies)
+    return [(role, by_role[role]) for role in order if by_role[role]]
+
+
+def _note_in_corpus(
+    store: Store, fresh: list[Group], queries: dict[str, SearchQuery]
+) -> None:
+    """Каждая новая вакансия — в vacancies, а запрос, по которому она нашлась, —
+    в hits: role — роль для дайджеста и статистики, query — конкретный текст."""
     for name, vacancies in fresh:
+        query = queries[name]
         for vacancy in vacancies:
             row = vacancy_card_row(vacancy)
             store.corpus.note_seen(row)
-            store.corpus.add_hit(row["id"], name, query_texts[name])
+            store.corpus.add_hit(row["id"], query.role, query.text)
 
 
 def _passes(score: Score | None, threshold: int) -> bool:

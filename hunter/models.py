@@ -13,6 +13,9 @@ class SearchQuery:
 
     name: str
     text: str
+    # Роль для дайджеста и статистики. У роли два запроса — обычный и
+    # текстовый про удалёнку, — и оба должны попасть в один блок.
+    role: str = ""
     area: int = 1
     salary: int | None = None
     experience: tuple[str, ...] = ()
@@ -20,6 +23,12 @@ class SearchQuery:
     only_with_salary: bool = True
     search_period: int = 1
     max_pages: int = 1
+
+    def __post_init__(self) -> None:
+        # Роль всегда заполнена: без неё дайджест и статистика потеряли бы
+        # блок, а тесты и CLI создают запрос без неё.
+        if not self.role:
+            object.__setattr__(self, "role", self.name)
 
 
 @dataclass(frozen=True, slots=True)
