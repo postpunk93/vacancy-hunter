@@ -216,6 +216,15 @@ LEFT JOIN latest_scores s ON s.vacancy_id = v.id
 GROUP BY h.role ORDER BY collected DESC;
 ```
 
+Рядом с порогом — оценка 3–4 за последнюю неделю (серый список из дайджеста):
+```sql
+SELECT v.id, v.name, v.company, s.score, s.why
+FROM latest_scores s JOIN vacancies v ON v.id = s.vacancy_id
+WHERE s.score BETWEEN 3 AND 4
+  AND v.first_seen_at >= date('now', '-7 days')
+ORDER BY s.score DESC, v.published_at DESC LIMIT 100;
+```
+
 Всего по статусам воронки — текущий этап:
 ```sql
 SELECT status, count(*) AS n FROM applications GROUP BY status ORDER BY n DESC;
