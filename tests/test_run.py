@@ -1136,3 +1136,20 @@ def test_hits_record_the_role_not_the_query_name():
 
     rows = store.corpus._conn.execute("SELECT role, query FROM hits").fetchall()
     assert [tuple(row) for row in rows] == [("promo", "smm")]
+
+def test_same_query_name_does_not_mix_roles():
+    from hunter.run import _merge_by_role
+
+    first, second = object(), object()
+    merged = _merge_by_role(
+        [("Запрос", [first]), ("Запрос", [second])],
+        (
+            SearchQuery(name="Запрос", role="author", text="a"),
+            SearchQuery(name="Запрос", role="promo", text="b"),
+        ),
+    )
+
+    assert [(role, items) for role, items in merged] == [
+        ("author", [first]),
+        ("promo", [second]),
+    ]

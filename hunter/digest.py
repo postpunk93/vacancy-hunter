@@ -257,8 +257,10 @@ def render_console(
         header = _plural_vacancies(total).capitalize()
         if below:
             header += f" · ещё {below} ниже порога {threshold}"
-    elif below:
-        header = f"Все {_plural_vacancies(below)} ниже порога {threshold}"
+    elif below or nearby or unscored:
+        header = "Новых вакансий выше порога нет"
+        if below:
+            header += f" · ещё {below} ниже порога {threshold}"
     else:
         header = "Новых вакансий нет"
 

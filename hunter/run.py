@@ -190,12 +190,13 @@ def run_pass(
     mark_seen(duplicates, sent=False)
 
     fresh: list[Group] = [(name, store.unseen(vs)) for name, vs in cleaned]
-    fresh = [(name, vs) for name, vs in fresh if vs]
     total_new = sum(len(vs) for _, vs in fresh)
     if not dry_run:
         # Корпус пополняется до отправки: сбой Телеграма вакансии не теряет,
         # а повторный проход ничего не задвоит (note_seen и add_hit идемпотентны).
-        _note_in_corpus(store, fresh, {q.name: q for q in config.queries})
+        # Пустые группы не отбрасываются до этого места: запросы сопоставляются
+        # по позиции, и сдвиг испортил бы роли в hits.
+        _note_in_corpus(store, fresh, config.queries)
     fresh = _merge_by_role(fresh, config.queries)
 
     log.info(
@@ -266,12 +267,17 @@ def run_pass(
         log.error("Отправка не удалась, вакансии остаются новыми: %s", exc)
         return EXIT_TELEGRAM_FAILED
 
-    if dry_run and (nearby or unscored or low):
-        for title, vacancies in (
-            (f"Рядом ({nearby_threshold}–{threshold - 1})", nearby),
-            ("Без оценки", unscored),
-            (f"Ниже порога {threshold}", low),
-        ):
+    if dry_run:
+        # Сводка печатает «Рядом» и «Без оценки» целиком, а ниже порога —
+        # только счётом. Если сводки не было, в пробном прогоне нужны все три
+        # списка; если была — дописываем только то, чего в ней нет.
+        show_all = not (console or echo is not None)
+        blocks = []
+        if show_all:
+            blocks.append((f"Рядом ({nearby_threshold}–{threshold - 1})", nearby))
+            blocks.append(("Без оценки", unscored))
+        blocks.append((f"Ниже порога {threshold}", low))
+        for title, vacancies in blocks:
             if not vacancies:
                 continue
             print(f"{title}:")
@@ -288,22 +294,24 @@ def run_pass(
 
 def _merge_by_role(groups: list[Group], queries: tuple[SearchQuery, ...]) -> list[Group]:
     """У роли два запроса — обычный и текстовый про удалёнку. В дайджесте
-    должен быть один блок, поэтому группы склеиваются по роли."""
-    role_by_name = {q.name: q.role for q in queries}
+    должен быть один блок, поэтому группы склеиваются по роли. Группы идут
+    в порядке конфига, поэтому сопоставляются по позиции, а не по имени:
+    одинаковые имена запросов не должны путать роли."""
     order = list(dict.fromkeys(q.role for q in queries))
     by_role: dict[str, list[Vacancy]] = {role: [] for role in order}
-    for name, vacancies in groups:
-        by_role[role_by_name[name]].extend(vacancies)
+    for (_, vacancies), query in zip(groups, queries, strict=True):
+        by_role[query.role].extend(vacancies)
     return [(role, by_role[role]) for role in order if by_role[role]]
 
 
 def _note_in_corpus(
-    store: Store, fresh: list[Group], queries: dict[str, SearchQuery]
+    store: Store, fresh: list[Group], queries: tuple[SearchQuery, ...]
 ) -> None:
     """Каждая новая вакансия — в vacancies, а запрос, по которому она нашлась, —
-    в hits: role — роль для дайджеста и статистики, query — конкретный текст."""
-    for name, vacancies in fresh:
-        query = queries[name]
+    в hits: role — роль для дайджеста и статистики, query — конкретный текст.
+    Группы сопоставляются с запросами по позиции (порядок _collect = порядок
+    конфига), иначе одинаковые имена запросов перепутали бы роли."""
+    for (_, vacancies), query in zip(fresh, queries, strict=True):
         for vacancy in vacancies:
             row = vacancy_card_row(vacancy)
             store.corpus.note_seen(row)

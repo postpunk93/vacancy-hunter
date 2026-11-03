@@ -314,3 +314,17 @@ def test_console_prints_nearby_and_unscored_without_a_cap():
 
     assert "ещё" not in text
     assert text.count("Рядом (45)") == 1
+
+def test_console_header_mentions_nearby_instead_of_no_vacancies():
+    from hunter.digest import render_console
+    from hunter.models import Score
+
+    nearby = [make_vacancy(vacancy_id="1")]
+    text = render_console(
+        [], scores={nearby[0].key: Score(3, "рядом")}, below=0, threshold=5,
+        warnings=(), nearby=nearby, unscored=[],
+    )
+
+    assert "Новых вакансий нет" not in text
+    assert "Новых вакансий выше порога нет" in text
+    assert "Рядом (1)" in text
