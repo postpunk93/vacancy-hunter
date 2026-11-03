@@ -223,3 +223,94 @@ def test_console_summary_drops_city_subdomain_from_hh_links():
     text = render_console([("q", [v])], scores=None, below=0, threshold=5, warnings=())
 
     assert text.endswith("https://hh.ru/vacancy/7")
+
+
+def test_nearby_block_shows_score_why_and_company():
+    from hunter.digest import render_console
+    from hunter.models import Score
+
+    v = make_vacancy(name="Редактор", company="Рунити")
+    text = render_console(
+        [],
+        scores={v.key: Score(3, "роль та, нет кейсов B2B")},
+        below=2,
+        threshold=5,
+        warnings=(),
+        nearby=[v],
+        unscored=[],
+    )
+
+    assert "Рядом (1)" in text
+    assert "3 · Редактор — Рунити" in text
+    assert "роль та, нет кейсов B2B" in text
+
+
+def test_unscored_block_is_separate_from_passed():
+    from hunter.digest import render_console
+    from hunter.models import Score
+
+    v = make_vacancy()
+    text = render_console(
+        [],
+        scores={v.key: Score(None, "модель не ответила")},
+        below=0,
+        threshold=5,
+        warnings=(),
+        nearby=[],
+        unscored=[v],
+    )
+
+    assert "Без оценки (1)" in text
+    assert "? · Senior Python Developer" in text
+
+
+def test_nearby_is_capped_at_forty_in_telegram():
+    from hunter.models import Score
+
+    vacancies = [make_vacancy(vacancy_id=str(i)) for i in range(41)]
+    scores = {v.key: Score(4, "рядом") for v in vacancies}
+
+    text = "\n".join(render([], NOW, scores=scores, nearby=vacancies))
+
+    assert "ещё 1 в базе" in text
+    assert text.count('<a href=') == 40
+
+
+def test_exactly_forty_nearby_has_no_remainder_line():
+    from hunter.models import Score
+
+    vacancies = [make_vacancy(vacancy_id=str(i)) for i in range(40)]
+    scores = {v.key: Score(4, "рядом") for v in vacancies}
+
+    text = "\n".join(render([], NOW, scores=scores, nearby=vacancies))
+
+    assert "ещё" not in text
+    assert text.count('<a href=') == 40
+
+
+def test_unscored_is_capped_at_twenty_in_telegram():
+    from hunter.models import Score
+
+    vacancies = [make_vacancy(vacancy_id=str(i)) for i in range(21)]
+    scores = {v.key: Score(None, "оценка упала") for v in vacancies}
+
+    text = "\n".join(render([], NOW, scores=scores, unscored=vacancies))
+
+    assert "Без оценки (21)" in text
+    assert "ещё 1 в базе" in text
+    assert text.count('<a href=') == 20
+
+
+def test_console_prints_nearby_and_unscored_without_a_cap():
+    from hunter.digest import render_console
+    from hunter.models import Score
+
+    nearby = [make_vacancy(vacancy_id=str(i)) for i in range(45)]
+    scores = {v.key: Score(3, "рядом") for v in nearby}
+    text = render_console(
+        [], scores=scores, below=0, threshold=5, warnings=(),
+        nearby=nearby, unscored=[],
+    )
+
+    assert "ещё" not in text
+    assert text.count("Рядом (45)") == 1

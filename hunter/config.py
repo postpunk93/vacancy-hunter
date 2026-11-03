@@ -26,7 +26,7 @@ _QUERY_FIELDS = {
 
 MAX_PERIOD_DAYS = 30
 
-_SCORING_FIELDS = {"enabled", "profile", "threshold", "backend", "model"}
+_SCORING_FIELDS = {"enabled", "profile", "threshold", "nearby_threshold", "backend", "model"}
 _OLD_SCORING_FIELDS = ("portrait", "conflict")
 
 _BACKENDS = ("opencode", "claude")
@@ -43,6 +43,7 @@ class ScoringConfig:
 
     profile: Path
     threshold: int = 5
+    nearby_threshold: int = 3
     backend: str = "opencode"
     model: str = "opencode/big-pickle"
 
@@ -170,6 +171,12 @@ def _load_scoring(raw: object, base: Path) -> ScoringConfig | None:
     if isinstance(threshold, bool) or not isinstance(threshold, int) or not 1 <= threshold <= 10:
         raise ConfigError(f"scoring: threshold — число от 1 до 10, получено: {threshold!r}")
 
+    nearby = raw.get("nearby_threshold", 3)
+    if isinstance(nearby, bool) or not isinstance(nearby, int) or not 1 <= nearby <= threshold:
+        raise ConfigError(
+            f"scoring: nearby_threshold — число от 1 до {threshold}, получено: {nearby!r}"
+        )
+
     backend = raw.get("backend", "opencode")
     if not isinstance(backend, str) or backend not in _BACKENDS:
         raise ConfigError(
@@ -185,7 +192,13 @@ def _load_scoring(raw: object, base: Path) -> ScoringConfig | None:
             "например opencode/big-pickle; для Claude поставьте backend: claude"
         )
 
-    return ScoringConfig(profile=profile, threshold=threshold, backend=backend, model=model)
+    return ScoringConfig(
+        profile=profile,
+        threshold=threshold,
+        nearby_threshold=nearby,
+        backend=backend,
+        model=model,
+    )
 
 
 def with_search_period(config: Config, days: int) -> Config:

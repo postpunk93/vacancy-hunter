@@ -135,6 +135,42 @@ def _pack(blocks: list[str], limit: int) -> list[str]:
     return messages
 
 
+def _format_brief(vacancy: Vacancy, score: Score | None, *, html: bool) -> str:
+    """Одна строка для серой зоны: оценка, название, компания, з/п, ссылка, причина."""
+    label = _score_label(score)
+    why = ""
+    if score is not None and score.scored and score.why:
+        why = f" — {score.why}"
+    if html:
+        name = f'<a href="{escape(vacancy.url)}">{escape(vacancy.name)}</a>'
+        details = f"{escape(vacancy.company)} · {escape(format_salary(vacancy))}"
+        return f"• {label} · {name} — {details}{escape(why)}"
+    return (
+        f"  {label} · {vacancy.name} — {vacancy.company} · "
+        f"{format_salary(vacancy)} · {_console_url(vacancy)}{why}"
+    )
+
+
+def _brief_block(
+    title: str,
+    vacancies: list[Vacancy],
+    scores: Mapping[str, Score] | None,
+    *,
+    html: bool,
+    limit: int | None,
+) -> str:
+    """Блок серой зоны. В Телеграме он короткий: остальное лежит в базе."""
+    shown = vacancies if limit is None else vacancies[:limit]
+    body = "\n".join(
+        _format_brief(v, None if scores is None else scores.get(v.key), html=html)
+        for v in shown
+    )
+    block = f"{title} ({len(vacancies)})\n{body}"
+    if limit is not None and len(vacancies) > limit:
+        block += f"\nещё {len(vacancies) - limit} в базе"
+    return block
+
+
 def render(
     groups: list[Group],
     now: datetime,
@@ -143,14 +179,21 @@ def render(
     scores: Mapping[str, Score] | None = None,
     below: int = 0,
     threshold: int = 5,
+    nearby: list[Vacancy] | None = None,
+    unscored: list[Vacancy] | None = None,
+    nearby_limit: int = 40,
+    unscored_limit: int = 20,
 ) -> list[str]:
     """Собирает дайджест из всех переданных групп, без потолка. Длинный
     дайджест режется на сообщения по границе группы, а слишком длинная
     группа — по границе строки. С scores у каждой вакансии стоит оценка,
-    below — сколько вакансий не прошло порог и осталось только в базе."""
+    below — сколько вакансий не прошло порог и осталось только в базе.
+    nearby и unscored — серая зона: в Телеграме показываются с потолком."""
+    nearby = nearby or []
+    unscored = unscored or []
     filled = [(name, vacancies) for name, vacancies in groups if vacancies]
     total = sum(len(v) for _, v in filled)
-    if not total and not below and not warnings:
+    if not total and not below and not nearby and not unscored and not warnings:
         return []
 
     blocks: list[str] = []
@@ -166,6 +209,17 @@ def render(
     elif below:
         blocks.append(
             f"🔎 {stamp} · все {_plural_vacancies(below)} ниже {threshold} — в базе, выгрузка: vacancies export"
+        )
+    elif nearby or unscored:
+        blocks.append(f"🔎 {stamp}")
+
+    if nearby:
+        blocks.append(
+            _brief_block("Рядом", nearby, scores, html=True, limit=nearby_limit)
+        )
+    if unscored:
+        blocks.append(
+            _brief_block("Без оценки", unscored, scores, html=True, limit=unscored_limit)
         )
 
     for warning in warnings:
@@ -188,9 +242,14 @@ def render_console(
     below: int,
     threshold: int,
     warnings: tuple[str, ...],
+    nearby: list[Vacancy] | None = None,
+    unscored: list[Vacancy] | None = None,
 ) -> str:
     """Сводка прохода для консоли: обычный текст, без HTML и лимита Телеграма.
-    Без scores (оценка выключена) вакансии идут без оценки в начале строки."""
+    Без scores (оценка выключена) вакансии идут без оценки в начале строки.
+    nearby и unscored печатаются целиком: консоль не режется на сообщения."""
+    nearby = nearby or []
+    unscored = unscored or []
     filled = [(name, vacancies) for name, vacancies in groups if vacancies]
     total = sum(len(v) for _, v in filled)
 
@@ -215,6 +274,12 @@ def render_console(
                 f"  {prefix}{vacancy.name} — {vacancy.company} · "
                 f"{format_salary(vacancy)} · {_console_url(vacancy)}{why}"
             )
+    if nearby:
+        lines.append("")
+        lines.append(_brief_block("Рядом", nearby, scores, html=False, limit=None))
+    if unscored:
+        lines.append("")
+        lines.append(_brief_block("Без оценки", unscored, scores, html=False, limit=None))
     if warnings:
         lines.append("")
         lines.extend(f"⚠️ {warning}" for warning in warnings)

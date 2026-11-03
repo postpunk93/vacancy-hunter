@@ -336,6 +336,38 @@ scoring:
         assert field in str(info.value)
 
 
+def test_nearby_threshold_defaults_to_three(tmp_path):
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + "\nscoring:\n  profile: profile.md\n")
+
+    assert load_config(path).scoring.nearby_threshold == 3
+
+
+def test_nearby_threshold_above_threshold_is_an_error(tmp_path):
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + """
+scoring:
+  profile: profile.md
+  threshold: 5
+  nearby_threshold: 6
+""")
+
+    with pytest.raises(ConfigError, match="nearby_threshold"):
+        load_config(path)
+
+
+def test_nearby_threshold_must_be_at_least_one(tmp_path):
+    _profile(tmp_path)
+    path = write(tmp_path, _QUERIES + """
+scoring:
+  profile: profile.md
+  nearby_threshold: 0
+""")
+
+    with pytest.raises(ConfigError, match="nearby_threshold"):
+        load_config(path)
+
+
 def test_telegram_is_off_by_default(tmp_path):
     path = write(tmp_path, 'queries:\n  - name: "x"\n    text: "python"\n')
 
