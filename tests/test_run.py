@@ -556,7 +556,7 @@ def _sent_at(store, key):
 
 def test_below_threshold_stays_in_corpus_not_telegram():
     store = Store(":memory:")
-    score = FakeScore({"hh:1": Score(8, "да"), "hh:2": Score(3, "нет")})
+    score = FakeScore({"hh:1": Score(8, "да"), "hh:2": Score(1, "нет")})
 
     code, text = _scored_pass(store, score)
 
@@ -568,17 +568,59 @@ def test_below_threshold_stays_in_corpus_not_telegram():
     assert _sent_at(store, "hh:2")[0] is None, "отсеянная помечена виденной, но не отправленной"
 
 
-def test_unscored_and_card_scores_bypass_the_threshold():
+def test_card_score_below_threshold_goes_to_nearby_not_the_main_list():
     store = Store(":memory:")
     score = FakeScore({
-        "hh:1": Score(None, "модель не оценила"),
-        "hh:2": Score(2, "по карточке", from_card=True),
+        "hh:1": Score(7, "да"),
+        "hh:2": Score(3, "по карточке", from_card=True),
     })
 
     _, text = _scored_pass(store, score)
 
-    assert "Вакансия 1" in text and "Вакансия 2" in text
-    assert "ниже" not in text
+    assert "• 7 · " in text
+    assert "Рядом (1)" in text
+    assert "3* · " in text and "Вакансия 2" in text
+
+
+def test_unscored_goes_to_its_own_block():
+    store = Store(":memory:")
+    score = FakeScore({"hh:1": Score(7, "да"), "hh:2": Score(None, "модель не ответила")})
+
+    _, text = _scored_pass(store, score)
+
+    assert "Без оценки (1)" in text
+    assert "• ? · " in text and "Вакансия 2" in text
+
+
+def test_low_scores_are_counted_only():
+    store = Store(":memory:")
+    score = FakeScore({"hh:1": Score(7, "да"), "hh:2": Score(1, "нет")})
+
+    _, text = _scored_pass(store, score)
+
+    assert "ещё 1 ниже 5" in text
+    assert "1 · Вакансия 2" not in text
+
+
+def test_nearby_threshold_comes_from_the_argument():
+    store = Store(":memory:")
+    score = FakeScore({"hh:1": Score(5, "да"), "hh:2": Score(3, "рядом")})
+
+    _, text = _scored_pass(store, score, nearby_threshold=2)
+
+    assert "Рядом (1)" in text
+
+
+def test_scoring_crash_sends_all_to_the_unscored_block():
+    store = Store(":memory:")
+
+    def boom(vacancies):
+        raise RuntimeError("quota")
+
+    _, text = _scored_pass(store, boom)
+
+    assert "Без оценки (2)" in text
+    assert "<b>" not in text, "в основном списке пусто — всё в серой зоне"
 
 
 def test_all_below_threshold_sends_header_only():
@@ -600,8 +642,8 @@ def test_threshold_comes_from_the_argument():
 
     _, text = _scored_pass(store, score, threshold=7)
 
-    assert "Вакансия 2" in text and "Вакансия 1" not in text
-    assert "ещё 1 ниже 7" in text
+    assert "• 7 · " in text and "1 новая вакансия" in text
+    assert "Рядом (1)" in text and "Вакансия 1" in text
 
 
 def test_scores_are_shown_and_sorted_in_the_digest():
@@ -670,7 +712,7 @@ def test_block_during_text_fetch_keeps_exit_ok(tmp_path):
 
     def ask(system, payload):
         items = json.loads(payload)
-        return {"items": [{"id": i["id"], "score": 2, "why": "мало данных", "flags": []} for i in items]}
+        return {"items": [{"id": i["id"], "score": 3, "why": "мало данных", "flags": []} for i in items]}
 
     def score(vacancies):
         return score_pass(
@@ -685,7 +727,7 @@ def test_block_during_text_fetch_keeps_exit_ok(tmp_path):
 
     assert code == 0
     assert "Вакансия 1" in text and "Вакансия 2" in text, "по карточке — мимо порога"
-    assert "• 2* · " in text
+    assert "• 3* · " in text
     assert "⚠️ hh заблокировал скачивание текстов" in text
 
 
@@ -696,7 +738,7 @@ def test_dry_run_prints_filtered_and_keeps_seen_untouched(capsys):
     _scored_pass(store, score, dry_run=True)
 
     out = capsys.readouterr().out
-    assert "Ниже порога 5:" in out
+    assert "Рядом (3–4):" in out
     assert "3 · Вакансия 2 — чужая роль" in out
     assert store._conn.execute("SELECT COUNT(*) FROM seen").fetchone()[0] == 0
 

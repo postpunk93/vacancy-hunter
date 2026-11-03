@@ -125,6 +125,7 @@ def run_pass(
     dry_run: bool = False,
     score: Callable[[list[Vacancy]], tuple[dict[str, Score], list[str]]] | None = None,
     threshold: int = 5,
+    nearby_threshold: int = 3,
     console: bool = False,
     echo: Callable[[str], None] | None = None,
 ) -> int:
@@ -132,8 +133,8 @@ def run_pass(
     без сети и без Телеграма. При dry_run=True вакансии не помечаются
     виденными и не получают hits, но тексты и оценки кэшируются
     (fetch_texts кладёт вакансию в корпус). С score каждая новая
-    вакансия получает оценку; в Телеграм идут прошедшие порог threshold
-    и те, чью оценку нельзя считать надёжной (нет оценки или по карточке).
+    вакансия получает оценку и попадает в одну из четырёх корзин: прошедшие
+    порог threshold, «рядом» (nearby_threshold и выше), без оценки и ниже.
     С console=True вместо HTML-сообщений Телеграма send получает одну
     текстовую сводку; вакансии после неё помечаются так же, как после отправки.
     echo получает ту же текстовую сводку, когда сообщения идут в Телеграм:
@@ -206,7 +207,9 @@ def run_pass(
 
     scores: dict[str, Score] | None = None
     digest_groups = fresh
-    below: list[Vacancy] = []
+    nearby: list[Vacancy] = []
+    unscored: list[Vacancy] = []
+    low: list[Vacancy] = []
     if score is not None and fresh:
         new = [v for _, vs in fresh for v in vs]
         try:
@@ -221,17 +224,28 @@ def run_pass(
         fresh = [(name, sort_by_score(vs, scores)) for name, vs in fresh]
         digest_groups = []
         for name, vacancies in fresh:
-            passed = [v for v in vacancies if _passes(scores.get(v.key), threshold)]
-            below.extend(v for v in vacancies if v not in passed)
+            passed = []
+            for vacancy in vacancies:
+                route = _route(scores.get(vacancy.key), threshold, nearby_threshold)
+                if route == "passed":
+                    passed.append(vacancy)
+                elif route == "nearby":
+                    nearby.append(vacancy)
+                elif route == "unscored":
+                    unscored.append(vacancy)
+                else:
+                    low.append(vacancy)
             if passed:
                 digest_groups.append((name, passed))
+        nearby.sort(key=lambda v: (-scores[v.key].value, -v.published_at.timestamp()))
 
     if console or echo is not None:
         # Тишина после прохода непонятна тому, кто его запустил: сводка
         # печатается и когда новых вакансий нет.
         summary = render_console(
-            digest_groups, scores=scores, below=len(below),
+            digest_groups, scores=scores, below=len(low),
             threshold=threshold, warnings=tuple(warnings),
+            nearby=nearby, unscored=unscored,
         )
     if console:
         messages = [summary]
@@ -240,7 +254,8 @@ def run_pass(
             echo(summary)
         messages = render(
             digest_groups, now, warnings=tuple(warnings),
-            scores=scores, below=len(below), threshold=threshold,
+            scores=scores, below=len(low), threshold=threshold,
+            nearby=nearby, unscored=unscored,
         )
         if not messages:
             return EXIT_OK
@@ -251,14 +266,22 @@ def run_pass(
         log.error("Отправка не удалась, вакансии остаются новыми: %s", exc)
         return EXIT_TELEGRAM_FAILED
 
-    if dry_run and below:
-        print(f"Ниже порога {threshold}:")
-        for vacancy in below:
-            item = scores[vacancy.key]
-            print(f"  {item.value} · {vacancy.name} — {item.why}")
+    if dry_run and (nearby or unscored or low):
+        for title, vacancies in (
+            (f"Рядом ({nearby_threshold}–{threshold - 1})", nearby),
+            ("Без оценки", unscored),
+            (f"Ниже порога {threshold}", low),
+        ):
+            if not vacancies:
+                continue
+            print(f"{title}:")
+            for vacancy in vacancies:
+                item = scores[vacancy.key]
+                label = "?" if not item.scored else str(item.value)
+                print(f"  {label} · {vacancy.name} — {item.why}")
 
     mark_seen([v for _, vs in digest_groups for v in vs], sent=True)
-    mark_seen(below, sent=False)
+    mark_seen(nearby + unscored + low, sent=False)
 
     return EXIT_OK
 
@@ -287,12 +310,17 @@ def _note_in_corpus(
             store.corpus.add_hit(row["id"], query.role, query.text)
 
 
-def _passes(score: Score | None, threshold: int) -> bool:
-    """Оценка по одной карточке ненадёжна: слабое название легко уронит
-    хорошую вакансию. Такие и неоценённые идут в Телеграм в любом случае."""
-    if score is None or not score.scored or score.from_card:
-        return True
-    return score.value >= threshold
+def _route(score: Score | None, threshold: int, nearby_threshold: int) -> str:
+    """Куда вакансия идёт в дайджесте. Оценка по одной карточке ненадёжна,
+    но решение принимается по её значению: звёздочка в подписи это показывает.
+    Неоценённая не попадает в основной список — иначе сбой модели раздул бы его."""
+    if score is None or not score.scored:
+        return "unscored"
+    if score.value >= threshold:
+        return "passed"
+    if score.value >= nearby_threshold:
+        return "nearby"
+    return "low"
 
 
 def _use_utf8_console() -> None:
@@ -431,6 +459,9 @@ def main(argv: list[str] | None = None) -> int:
                     dry_run=args.dry_run,
                     score=score,
                     threshold=config.scoring.threshold if config.scoring else 5,
+                    nearby_threshold=(
+                        config.scoring.nearby_threshold if config.scoring else 3
+                    ),
                     console=to_console,
                     echo=None if to_console else print,
                 )
