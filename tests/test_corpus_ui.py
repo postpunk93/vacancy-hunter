@@ -1,12 +1,15 @@
 import json
+import threading
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs
+from urllib.error import HTTPError
+from urllib.parse import parse_qs, quote
+from urllib.request import urlopen
 
 import pytest
 
 from hunter.corpus.extract import vacancy_card_row
 from hunter.corpus.store import Corpus
-from hunter.corpus.ui import Filters, parse_filters, render_page, select_rows
+from hunter.corpus.ui import Filters, make_server, parse_filters, render_page, select_rows
 from hunter.export import export_rows
 from tests.factories import make_vacancy
 
@@ -168,3 +171,27 @@ def test_page_keeps_filters_in_form_and_row_back(corpus):
     page = _page(corpus, filters=Filters(days=7, status="new", q="python"))
     assert 'name="q" value="python"' in page
     assert 'name="back" value="/?days=7&amp;status=new&amp;q=python"' in page
+
+
+@pytest.fixture
+def server(db):
+    started = make_server(db, 0)
+    thread = threading.Thread(target=started.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{started.server_address[1]}"
+    started.shutdown()
+    started.server_close()
+
+
+def test_get_renders_and_filters(corpus, server):
+    _add(corpus, 1, name="Яндекс Практикум")
+    _add(corpus, 2, name="VK")
+    assert "Яндекс Практикум" in urlopen(server + "/").read().decode()
+    body = urlopen(server + "/?q=" + quote("яндекс")).read().decode()
+    assert "Яндекс Практикум" in body and "VK" not in body
+
+
+def test_unknown_path_is_404(server):
+    with pytest.raises(HTTPError) as caught:
+        urlopen(server + "/nope")
+    assert caught.value.code == 404

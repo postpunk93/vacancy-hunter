@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import errno
 import html
 import json
 import sqlite3
+import sys
+import webbrowser
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlsplit
 
-from .store import STATUSES, STATUS_LABELS
+from ..export import export_rows
+from .store import STATUSES, STATUS_LABELS, Corpus, CorpusError
 
 SORTS = ("found", "score", "name")
 
@@ -353,3 +359,82 @@ def render_page(
         + f'<p class="count">Показано {len(rows)} из {total}</p>'
         "<script>" + _SCRIPT + "</script></body></html>"
     )
+
+
+class _Handler(BaseHTTPRequestHandler):
+    db: Path
+    threshold: int = 5
+
+    def _respond(self, status: int, body: str = "",
+                 content_type: str = "text/plain; charset=utf-8") -> None:
+        payload = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Cache-Control", "no-store")
+        if payload:
+            self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if payload:
+            self.wfile.write(payload)
+
+    def do_GET(self) -> None:
+        url = urlsplit(self.path)
+        if url.path == "/":
+            try:
+                with Corpus.open_readonly(self.db) as corpus:
+                    all_rows = export_rows(corpus, None)
+                    filters = parse_filters(parse_qs(url.query))
+                    rows = select_rows(all_rows, filters)
+                    page = render_page(
+                        rows, filters=filters, threshold=self.threshold, total=len(all_rows),
+                    )
+            except CorpusError as exc:
+                self._respond(500, str(exc))
+                return
+            self._respond(200, page, "text/html; charset=utf-8")
+        elif url.path == "/favicon.ico":
+            self._respond(204)
+        else:
+            self._respond(404, "Нет такой страницы")
+
+    def log_message(self, format: str, *args) -> None:
+        pass
+
+
+def make_server(
+    db: Path, port: int = 0, *, host: str = "127.0.0.1", threshold: int = 5,
+) -> ThreadingHTTPServer:
+    """Сервер на localhost; базу не читает, пока не пришёл первый запрос."""
+    handler = type("_BoundHandler", (_Handler,), {"db": Path(db), "threshold": threshold})
+    server = ThreadingHTTPServer((host, port), handler)
+    server.daemon_threads = True
+    return server
+
+
+def serve(
+    db: Path, port: int = 8765, *, open_browser: bool = True,
+    host: str = "127.0.0.1", threshold: int = 5,
+) -> int:
+    """Поднимает таблицу и держит её до Ctrl+C. Возвращает код выхода."""
+    db = Path(db)
+    if not db.exists():
+        print(f"База {db} не найдена. Сначала выполните vacancies init.", file=sys.stderr)
+        return 2
+    try:
+        server = make_server(db, port, host=host, threshold=threshold)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            print(f"Порт {port} занят, попробуйте --port", file=sys.stderr)
+            return 2
+        raise
+    url = f"http://{host}:{server.server_address[1]}"
+    print(f"Таблица: {url}")
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        server.server_close()
+    return 0
