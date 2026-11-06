@@ -2,8 +2,8 @@ import json
 import threading
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, quote
-from urllib.request import urlopen
+from urllib.parse import parse_qs, quote, urlencode
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 import pytest
 
@@ -195,3 +195,57 @@ def test_unknown_path_is_404(server):
     with pytest.raises(HTTPError) as caught:
         urlopen(server + "/nope")
     assert caught.value.code == 404
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _post(server, data, *, follow=False, fetch=False):
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if fetch:
+        headers["X-Requested-With"] = "fetch"
+    request = Request(server + "/save", data=urlencode(data).encode(), headers=headers)
+    opener = build_opener() if follow else build_opener(NoRedirect)
+    return opener.open(request)
+
+
+def test_save_writes_status_and_note(db, corpus, server):
+    _add(corpus, 7)
+    response = _post(server, {"id": 7, "status": "applied", "note": "отклик", "back": "/"}, fetch=True)
+    assert response.status == 204
+    with Corpus.open(db) as opened:
+        application = opened.application(7)
+    assert (application["status"], application["note"]) == ("applied", "отклик")
+
+
+def test_empty_note_clears_it(db, corpus, server):
+    _add(corpus, 7)
+    corpus.set_status(7, "applied", "старая")
+    _post(server, {"id": 7, "status": "applied", "note": "", "back": "/"}, fetch=True)
+    with Corpus.open(db) as opened:
+        assert opened.application(7)["note"] == ""
+
+
+def test_no_js_redirects_to_same_view(corpus, server):
+    _add(corpus, 7)
+    with pytest.raises(HTTPError) as caught:
+        _post(server, {"id": 7, "status": "test", "note": "", "back": "/?days=7&status=new"})
+    assert caught.value.code == 303
+    assert caught.value.headers["Location"] == "/?days=7&status=new#v-7"
+
+
+def test_bad_status_and_unknown_id_are_400(corpus, server):
+    _add(corpus, 7)
+    for data in ({"id": 7, "status": "nope", "note": ""}, {"id": 999, "status": "applied", "note": ""}):
+        with pytest.raises(HTTPError) as caught:
+            _post(server, data, fetch=True)
+        assert caught.value.code == 400
+
+
+def test_back_cannot_leave_the_site(corpus, server):
+    _add(corpus, 7)
+    with pytest.raises(HTTPError) as caught:
+        _post(server, {"id": 7, "status": "applied", "note": "", "back": "//evil.com"})
+    assert caught.value.headers["Location"] == "/#v-7"

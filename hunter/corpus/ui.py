@@ -17,6 +17,9 @@ from .store import STATUSES, STATUS_LABELS, Corpus, CorpusError
 
 SORTS = ("found", "score", "name")
 
+# Тело POST /save больше этого не читаем: одна строка формы — это сотни байт.
+_MAX_BODY = 64 * 1024
+
 
 @dataclass(frozen=True)
 class Filters:
@@ -396,6 +399,59 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(204)
         else:
             self._respond(404, "Нет такой страницы")
+
+    def do_POST(self) -> None:
+        url = urlsplit(self.path)
+        if url.path != "/save":
+            self._respond(404, "Нет такой страницы")
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length > _MAX_BODY:
+            self._respond(413, "Слишком большое тело запроса")
+            return
+        raw = self.rfile.read(length) if length > 0 else b""
+        data = parse_qs(raw.decode("utf-8", errors="replace"))
+
+        def field(name: str, default: str = "") -> str:
+            values = data.get(name) or []
+            return values[0] if values else default
+
+        try:
+            vacancy_id = int(field("id"))
+        except ValueError:
+            self._respond(400, "Неверная вакансия")
+            return
+        status = field("status")
+        if not status:
+            self._respond(400, "Сначала выберите этап")
+            return
+        if status not in STATUSES:
+            self._respond(400, "Неверный этап")
+            return
+        note = field("note")
+        back = field("back", "/") or "/"
+        if not back.startswith("/") or back.startswith("//"):
+            back = "/"
+        back = back.split("#", 1)[0]
+
+        try:
+            with Corpus.open(self.db) as corpus:
+                corpus.set_status(vacancy_id, status, note)
+        except CorpusError as exc:
+            self._respond(400, str(exc))
+            return
+
+        if self.headers.get("X-Requested-With") == "fetch":
+            self._respond(204)
+            return
+        self.send_response(303)
+        self.send_header("Location", f"{back}#v-{vacancy_id}")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def log_message(self, format: str, *args) -> None:
         pass
