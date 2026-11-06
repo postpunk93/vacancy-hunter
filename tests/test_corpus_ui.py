@@ -249,9 +249,10 @@ def test_bad_status_and_unknown_id_are_400(corpus, server):
 
 def test_back_cannot_leave_the_site(corpus, server):
     _add(corpus, 7)
-    with pytest.raises(HTTPError) as caught:
-        _post(server, {"id": 7, "status": "applied", "note": "", "back": "//evil.com"})
-    assert caught.value.headers["Location"] == "/#v-7"
+    for back in ("//evil.com", "/\\evil.com"):
+        with pytest.raises(HTTPError) as caught:
+            _post(server, {"id": 7, "status": "applied", "note": "", "back": back})
+        assert caught.value.headers["Location"] == "/#v-7"
 
 
 @pytest.fixture

@@ -433,7 +433,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         note = field("note")
         back = field("back", "/") or "/"
-        if not back.startswith("/") or back.startswith("//"):
+        if not back.startswith("/") or back.startswith("//") or "\\" in back:
             back = "/"
         back = back.split("#", 1)[0]
 
