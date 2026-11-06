@@ -6,7 +6,7 @@ import pytest
 
 from hunter.corpus.extract import vacancy_card_row
 from hunter.corpus.store import Corpus
-from hunter.corpus.ui import Filters, parse_filters, select_rows
+from hunter.corpus.ui import Filters, parse_filters, render_page, select_rows
 from hunter.export import export_rows
 from tests.factories import make_vacancy
 
@@ -120,3 +120,51 @@ def test_found_sort_newest_first(corpus):
     _age(corpus, 1, 3)
     rows = export_rows(corpus, None)
     assert [r["id"] for r in select_rows(rows, Filters())] == [2, 1]
+
+
+def _page(corpus, *, filters=None, threshold=5):
+    rows = export_rows(corpus, None)
+    return render_page(rows, filters=filters or Filters(), threshold=threshold, total=len(rows))
+
+
+def test_page_escapes_data(corpus):
+    _add(corpus, 1, name='<script>alert("x")</script>')
+    _apply(corpus, 1, "selected", '<b>заметка</b>')
+    page = _page(corpus)
+    assert "<script>alert" not in page
+    assert "&lt;script&gt;" in page
+    assert "&lt;b&gt;заметка" in page
+
+
+def test_page_has_columns_link_and_stages(corpus):
+    _add(corpus, 7, name="Python dev")
+    page = _page(corpus)
+    for header in ("Название", "Компания", "Оценка", "Почему", "Флаги", "Роль", "Этап", "Заметка", "Найдена"):
+        assert header in page
+    assert 'href="https://hh.ru/vacancy/7"' in page
+    assert 'target="_blank"' in page
+    assert '<option value="">новая</option>' in page
+    assert 'action="/save"' in page
+    assert 'id="v-7"' in page
+
+
+def test_score_class_follows_threshold(corpus):
+    _add(corpus, 1)
+    _add(corpus, 2)
+    _add(corpus, 3)
+    _add(corpus, 4)
+    _score(corpus, 1, 8)
+    _score(corpus, 2, 4)
+    _score(corpus, 3, 2)
+    page = _page(corpus)
+    assert 'class="score good">8' in page
+    assert 'class="score near">4' in page
+    assert 'class="score low">2' in page
+    assert 'class="score none">—' in page
+
+
+def test_page_keeps_filters_in_form_and_row_back(corpus):
+    _add(corpus, 7)
+    page = _page(corpus, filters=Filters(days=7, status="new", q="python"))
+    assert 'name="q" value="python"' in page
+    assert 'name="back" value="/?days=7&amp;status=new&amp;q=python"' in page
