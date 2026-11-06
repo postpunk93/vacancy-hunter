@@ -7,6 +7,9 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 import pytest
 
+from hunter import paths
+from hunter.corpus import ui
+from hunter.corpus.cli import main
 from hunter.corpus.extract import vacancy_card_row
 from hunter.corpus.store import Corpus
 from hunter.corpus.ui import Filters, make_server, parse_filters, render_page, select_rows
@@ -249,3 +252,24 @@ def test_back_cannot_leave_the_site(corpus, server):
     with pytest.raises(HTTPError) as caught:
         _post(server, {"id": 7, "status": "applied", "note": "", "back": "//evil.com"})
     assert caught.value.headers["Location"] == "/#v-7"
+
+
+@pytest.fixture
+def workdir(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(paths, "ME", tmp_path / "me")
+    return tmp_path
+
+
+def run(*argv):
+    return main(list(argv), fetch_page=lambda url: "", sleep=lambda _: None)
+
+
+def test_ui_command_passes_db_port_and_threshold(workdir, monkeypatch):
+    assert run("init") == 0
+    calls = {}
+    monkeypatch.setattr(ui, "serve", lambda db, port, **kw: calls.update(db=db, port=port, kw=kw) or 0)
+    assert run("ui", "--port", "9999", "--no-open") == 0
+    assert calls["db"] == workdir / "me" / "job-hunter.db"
+    assert calls["port"] == 9999
+    assert calls["kw"] == {"open_browser": False, "threshold": 5}

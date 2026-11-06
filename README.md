@@ -16,7 +16,7 @@
 | 3. Сбор и оценка | «собери свежие» | Запускает проход: выдача hh и zarplata, отсев рекламы и дублей, скачивание текстов, оценка каждой вакансии 1–10 с причиной и флагами. В чат — нумерованный список прошедших порог, отдельно «рядом» (3–4) и вакансии без оценки | [`collect`](.claude/skills/collect/SKILL.md), [`hunter/run.py`](hunter/run.py), [`hunter/scoring.py`](hunter/scoring.py) |
 | 4. Донастройка | «слишком много X», «подними порог» | Правит профиль или конфиг, пересчитывает оценки по уже скачанным текстам без запросов к hh, говорит, что поднялось и что упало | [`tune`](.claude/skills/tune/SKILL.md), [`hunter/evaluate.py`](hunter/evaluate.py) |
 | 5. Черновики | «черновики по 2, 5, 7» | Выбирает резюме, пишет сопроводительное письмо по фактам из резюме, отвечает на вопросы работодателя, отмечает тестовое со сроком | [`apply`](.claude/skills/apply/SKILL.md) |
-| 6. Воронка и тестовое | «откликнулся», «позвали», «отказ» | Ведёт этапы отклика. В начале каждого разговора напоминает: тестовое со сроком, черновик без отклика, отклик без ответа | [`.claude/settings.json`](.claude/settings.json), [`hunter/corpus/funnel.py`](hunter/corpus/funnel.py) |
+| 6. Воронка и тестовое | «откликнулся», «позвали», «отказ» | Ведёт этапы отклика. В начале каждого разговора напоминает: тестовое со сроком, черновик без отклика, отклик без ответа | [`.claude/settings.json`](.claude/settings.json), [`hunter/corpus/funnel.py`](hunter/corpus/funnel.py), [`hunter/corpus/ui.py`](hunter/corpus/ui.py) |
 
 Как Claude узнаёт, что делать: [`CLAUDE.md`](CLAUDE.md) — этапы и правила,
 skills в [`.claude/skills/`](.claude/skills/) — пошаговые инструкции на каждый
@@ -88,6 +88,7 @@ vacancies rescore         # пересчитать оценки после пр�
 vacancies rescore --limit 10   # пилот на 10 самых свежих
 vacancies eval --from старая.db                 # сверить оценку с вердиктами
 vacancies export          # xlsx — только по просьбе
+vacancies ui              # локальная таблица вакансий в браузере
 ```
 
 Подробно — в [`hunter/corpus/GUIDE.md`](hunter/corpus/GUIDE.md).

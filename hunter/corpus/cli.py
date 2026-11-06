@@ -21,6 +21,7 @@ from ..fetch import get_html, new_client
 from ..models import SearchQuery
 from ..scoring import ask_model, load_criteria
 from ..store import Store
+from . import ui
 from .collect import FetchPage, collect, fetch_details
 from .funnel import FUNNEL_COLUMNS, funnel_rows, reminders
 from .show import render_table, render_vacancy
@@ -230,6 +231,17 @@ def _cmd_export(args, fetch_page, sleep) -> int:
     return 0
 
 
+def _cmd_ui(args, fetch_page, sleep) -> int:
+    threshold = 5
+    try:
+        config = load_config(paths.config())
+    except ConfigError:
+        config = None
+    if config is not None and config.scoring is not None:
+        threshold = config.scoring.threshold
+    return ui.serve(args.db, args.port, open_browser=not args.no_open, threshold=threshold)
+
+
 def _cmd_eval(args, fetch_page, sleep) -> int:
     try:
         config = load_config(args.config)
@@ -364,6 +376,7 @@ _COMMANDS = {
     "show": _cmd_show,
     "sql": _cmd_sql,
     "export": _cmd_export,
+    "ui": _cmd_ui,
     "eval": _cmd_eval,
     "rescore": _cmd_rescore,
 }
@@ -424,6 +437,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, help="только найденные за последние N дней (по умолчанию все)")
     p.add_argument("--out", type=Path,
                    help="куда писать (по умолчанию me/exports/vacancies-ДАТА_ВРЕМЯ.xlsx)")
+
+    p = sub.add_parser("ui", help="локальная таблица вакансий в браузере")
+    p.add_argument("--port", type=int, default=8765, help="порт на 127.0.0.1 (по умолчанию 8765)")
+    p.add_argument("--no-open", action="store_true", help="не открывать браузер")
 
     p = sub.add_parser("eval", help="сверить оценки модели с вердиктами владельца в старой базе")
     p.add_argument("--from", dest="source", type=Path, required=True, metavar="PATH",
