@@ -176,6 +176,15 @@ def test_page_keeps_filters_in_form_and_row_back(corpus):
     assert 'name="back" value="/?days=7&amp;status=new&amp;q=python"' in page
 
 
+def test_save_form_remembers_initial_status(corpus):
+    _add(corpus, 1)
+    _apply(corpus, 1, "applied", "отклик")
+    _add(corpus, 2)
+    page = _page(corpus)
+    assert 'data-status="applied"' in page
+    assert 'data-status=""' in page
+
+
 @pytest.fixture
 def server(db):
     started = make_server(db, 0)

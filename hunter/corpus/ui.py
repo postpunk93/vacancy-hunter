@@ -179,8 +179,13 @@ document.querySelectorAll("form.save").forEach(function (form) {
   form.addEventListener("submit", function (event) {
     event.preventDefault();
     var row = form.closest("tr");
+    var stage = form.querySelector("select[name=status]");
+    var back = form.querySelector("input[name=back]");
     var button = row.querySelector("button[type=submit]");
     var flash = row.querySelector(".flash");
+    // Этап поменялся — после сохранения перечитываем список с теми же
+    // фильтрами: строка может из них выпасть или войти в них.
+    var stageChanged = stage.value !== form.dataset.status;
     button.disabled = true;
     flash.textContent = "";
     fetch("/save", {
@@ -188,16 +193,19 @@ document.querySelectorAll("form.save").forEach(function (form) {
       headers: {"X-Requested-With": "fetch"},
       body: new URLSearchParams(new FormData(form))
     }).then(function (response) {
-      if (response.ok) {
-        row.classList.add("saved");
-        flash.textContent = "сохранено";
-        setTimeout(function () {
-          row.classList.remove("saved");
-          flash.textContent = "";
-        }, 2000);
-      } else {
+      if (!response.ok) {
         return response.text().then(function (text) { flash.textContent = text; });
       }
+      if (stageChanged) {
+        window.location.href = back.value + "#" + row.id;
+        return;
+      }
+      row.classList.add("saved");
+      flash.textContent = "сохранено";
+      setTimeout(function () {
+        row.classList.remove("saved");
+        flash.textContent = "";
+      }, 2000);
     }).catch(function () {
       flash.textContent = "не удалось сохранить";
     }).finally(function () {
@@ -319,7 +327,8 @@ def _row(row, *, filters: Filters, threshold: int) -> str:
         + f'<td class="why" title="{_esc(why)}">{_esc(_short(why))}</td>'
         f'<td class="flags" title="{_esc(flags)}">{_esc(_short(flags))}</td>'
         f'<td>{_esc(row["role"])}</td>'
-        f'<td class="stage"><form class="save" id="f-{_esc(row["id"])}" method="post" action="/save">'
+        f'<td class="stage"><form class="save" id="f-{_esc(row["id"])}" method="post" action="/save"'
+        f' data-status="{_esc(_plain(row["status"]))}">'
         f'<input type="hidden" name="id" value="{_esc(row["id"])}">'
         f'<input type="hidden" name="back" value="{_esc(back)}">'
         + _stage_select(row)
