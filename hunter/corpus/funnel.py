@@ -21,7 +21,8 @@ def funnel_rows(corpus: Corpus) -> list[tuple]:
     """Вакансии с откликом, кроме закрытых, по порядку этапов воронки."""
     _, rows = corpus.query(
         "SELECT v.id, v.name, v.company, a.status, a.test_due, a.note "
-        "FROM applications a JOIN vacancies v ON v.id = a.vacancy_id"
+        "FROM applications a JOIN vacancies v ON v.id = a.vacancy_id "
+        "WHERE a.status IS NOT NULL"
     )
     shown = [row for row in rows if row[3] not in HIDDEN]
     shown.sort(key=lambda row: (STATUSES.index(row[3]), row[0]))

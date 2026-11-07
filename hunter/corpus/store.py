@@ -119,6 +119,22 @@ _MIGRATIONS = (
       FROM scores
     ) WHERE n = 1;
     """,
+    # v3: заметка без этапа. У вакансии может быть заметка («позвонить в пн»),
+    # пока решение по ней ещё не принято, — status становится необязательным.
+    f"""
+    CREATE TABLE applications_new (
+      vacancy_id INTEGER PRIMARY KEY REFERENCES vacancies(id),
+      status     TEXT CHECK (status IS NULL OR status IN ({_STATUS_LIST})),
+      note       TEXT,
+      test_task  TEXT,
+      test_due   TEXT,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO applications_new (vacancy_id, status, note, test_task, test_due, updated_at)
+      SELECT vacancy_id, status, note, test_task, test_due, updated_at FROM applications;
+    DROP TABLE applications;
+    ALTER TABLE applications_new RENAME TO applications;
+    """,
 )
 SCHEMA_VERSION = len(_MIGRATIONS)
 
@@ -153,9 +169,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             f"код знает v{SCHEMA_VERSION}). Обновите код."
         )
     for number in range(version, SCHEMA_VERSION):
-        conn.executescript(_MIGRATIONS[number])
-        conn.execute(f"PRAGMA user_version = {number + 1}")
-        conn.commit()
+        # DDL в SQLite транзакционен: миграция применяется целиком или никак.
+        # Без этого сбой между DROP TABLE applications и RENAME оставил бы
+        # данные в недоступной таблице, а повторный запуск упал бы на CREATE.
+        conn.executescript(
+            f"BEGIN;\n{_MIGRATIONS[number]}\n"
+            f"PRAGMA user_version = {number + 1};\nCOMMIT;"
+        )
 
 
 def _not_a_database(path: Path, exc: sqlite3.DatabaseError) -> CorpusError:
@@ -346,12 +366,13 @@ class Corpus:
         )
         self._conn.commit()
 
-    def set_status(self, vacancy_id: int, status: str, note: str | None = None, *,
+    def set_status(self, vacancy_id: int, status: str | None, note: str | None = None, *,
                    test_task: str | None = None, test_due: date | None = None) -> None:
-        """Этап отклика. None в note/test_* оставляет прежнее значение.
-        В историю пишется только смена этапа: повторный вызов с тем же
-        статусом (правка заметки или срока) не сдвигает отсчёт напоминаний."""
-        if status not in STATUSES:
+        """Этап отклика. None в status — этап не менять (сохранить одну заметку),
+        None в note/test_* — оставить прежнее значение. В историю пишется только
+        смена этапа: повторный вызов с тем же статусом (правка заметки или срока)
+        не сдвигает отсчёт напоминаний."""
+        if status is not None and status not in STATUSES:
             raise CorpusError(f"Статус должен быть одним из: {', '.join(STATUSES)}")
         if not self.exists(vacancy_id):
             raise CorpusError(
@@ -359,6 +380,8 @@ class Corpus:
             )
         now = self._clock()
         previous = self.application(vacancy_id)
+        if status is None and previous is not None:
+            status = previous["status"]
         self._conn.execute(
             "INSERT INTO applications (vacancy_id, status, note, test_task, test_due, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?) "
@@ -370,7 +393,7 @@ class Corpus:
             (vacancy_id, status, note, test_task,
              test_due.isoformat() if test_due else None, now),
         )
-        if previous is None or previous["status"] != status:
+        if status is not None and (previous is None or previous["status"] != status):
             self._conn.execute(
                 "INSERT INTO status_history (vacancy_id, status, at) VALUES (?, ?, ?)",
                 (vacancy_id, status, now),

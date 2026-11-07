@@ -30,7 +30,7 @@ def test_new_database_gets_current_schema(tmp_path):
     Corpus.open(tmp_path / "v.db", create=True).close()
 
     conn = sqlite3.connect(tmp_path / "v.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"vacancies", "hits", "verdicts", "seen", "meta", "scores", "applications", "status_history"} <= tables
     assert "texts" not in tables
@@ -243,6 +243,29 @@ def test_unknown_status_is_rejected_by_the_schema(corpus):
     corpus._conn.execute(insert, (STATUSES[0],))
 
 
+def test_note_can_be_saved_without_a_stage(corpus):
+    corpus.note_seen(vacancy_card_row(make_vacancy(vacancy_id="7")))
+
+    corpus.set_status(7, None, "позвонить в пн")
+
+    application = corpus.application(7)
+    assert application["status"] is None
+    assert application["note"] == "позвонить в пн"
+    _, history = corpus.query("SELECT count(*) FROM status_history")
+    assert history == [(0,)]
+
+
+def test_empty_stage_keeps_the_current_one(corpus):
+    corpus.note_seen(vacancy_card_row(make_vacancy(vacancy_id="7")))
+    corpus.set_status(7, "applied", "отклик")
+
+    corpus.set_status(7, None, "ждём ответа")
+
+    application = corpus.application(7)
+    assert application["status"] == "applied"
+    assert application["note"] == "ждём ответа"
+
+
 def test_every_status_has_a_label():
     assert set(STATUS_LABELS) == set(STATUSES)
 
@@ -269,7 +292,7 @@ def test_v1_database_with_data_is_upgraded_to_v2(tmp_path):
         assert corpus.verdict(7)["verdict"] == "yes"
 
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     conn.close()
     assert {"seen", "meta", "scores", "applications", "status_history", "latest_scores"} <= names
@@ -277,3 +300,36 @@ def test_v1_database_with_data_is_upgraded_to_v2(tmp_path):
     with Store(path) as store:
         assert store.is_empty() is True
         assert store.corpus.exists(7)
+
+
+def test_v2_applications_survive_the_migration_to_nullable_status(tmp_path):
+    path = tmp_path / "v2.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(_MIGRATIONS[0])
+    conn.executescript(_MIGRATIONS[1])
+    conn.execute("PRAGMA user_version = 2")
+    conn.execute(
+        "INSERT INTO vacancies (id, name, company, url, first_seen_at, last_seen_at) "
+        "VALUES (7, 'Python', 'Авито', 'https://hh.ru/vacancy/7', 't', 't')"
+    )
+    conn.execute(
+        "INSERT INTO applications (vacancy_id, status, note, test_task, test_due, updated_at) "
+        "VALUES (7, 'applied', 'отклик', 'написать сервис', '2026-11-20', 't')"
+    )
+    conn.commit()
+    conn.close()
+
+    with Corpus.open(path) as corpus:
+        application = corpus.application(7)
+        assert (
+            application["status"], application["note"],
+            application["test_task"], application["test_due"],
+        ) == ("applied", "отклик", "написать сервис", "2026-11-20")
+
+    # Повторное открытие уже мигрированной базы ничего не ломает.
+    with Corpus.open(path) as corpus:
+        assert corpus.application(7)["status"] == "applied"
+
+    conn = sqlite3.connect(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    conn.close()

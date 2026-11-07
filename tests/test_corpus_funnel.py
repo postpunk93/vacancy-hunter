@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from hunter.corpus.extract import vacancy_card_row
-from hunter.corpus.funnel import reminders
+from hunter.corpus.funnel import funnel_rows, reminders
 from hunter.corpus.store import Corpus, CorpusError
 from tests.factories import make_vacancy
 
@@ -77,6 +77,15 @@ def test_unknown_status_is_an_error(corpus):
 
 def test_application_of_vacancy_without_one_is_none(corpus):
     assert corpus.application(7) is None
+
+
+def test_note_without_a_stage_is_not_in_the_funnel_or_reminders(corpus, clock):
+    clock.days_ago(14)
+    corpus.set_status(7, None, "позвонить в пн")
+
+    assert corpus.application(7)["note"] == "позвонить в пн"
+    assert funnel_rows(corpus) == []
+    assert reminders(corpus, TODAY) == []
 
 
 def _in_test(corpus, due: date) -> None:

@@ -149,7 +149,7 @@ def test_page_has_columns_link_and_stages(corpus):
         assert header in page
     assert 'href="https://hh.ru/vacancy/7"' in page
     assert 'target="_blank"' in page
-    assert '<option value="">новая</option>' in page
+    assert '<option value="" selected>не задан</option>' in page
     assert 'action="/save"' in page
     assert 'id="v-7"' in page
 
@@ -166,7 +166,7 @@ def test_score_class_follows_threshold(corpus):
     assert 'class="score good">8' in page
     assert 'class="score near">4' in page
     assert 'class="score low">2' in page
-    assert 'class="score none">—' in page
+    assert 'class="score none"><span aria-hidden="true">—</span>' in page
 
 
 def test_page_keeps_filters_in_form_and_row_back(corpus):
@@ -183,6 +183,28 @@ def test_save_form_remembers_initial_status(corpus):
     page = _page(corpus)
     assert 'data-status="applied"' in page
     assert 'data-status=""' in page
+
+
+def test_staged_row_has_no_blank_stage_option(corpus):
+    _add(corpus, 1)
+    _apply(corpus, 1, "applied", "отклик")
+
+    page = _page(corpus)
+
+    assert 'не задан' not in page
+
+
+def test_page_exposes_names_sort_state_and_human_role(corpus):
+    _add(corpus, 7, name="Python dev", role="promo")
+    page = _page(corpus, filters=Filters(sort="score"))
+    assert 'scope="col"' in page
+    assert 'aria-sort="descending"' in page
+    assert 'aria-label="Этап отклика для вакансии «Python dev»"' in page
+    assert 'aria-label="Заметка к вакансии «Python dev»"' in page
+    assert 'role="status"' in page
+    assert "<caption" in page
+    assert "продвижение" in page
+    assert '<td class="found" title="' in page
 
 
 @pytest.fixture
@@ -238,6 +260,25 @@ def test_empty_note_clears_it(db, corpus, server):
     _post(server, {"id": 7, "status": "applied", "note": "", "back": "/"}, fetch=True)
     with Corpus.open(db) as opened:
         assert opened.application(7)["note"] == ""
+
+
+def test_note_saves_without_a_stage(db, corpus, server):
+    _add(corpus, 7)
+    response = _post(server, {"id": 7, "status": "", "note": "позвонить", "back": "/"}, fetch=True)
+    assert response.status == 204
+    with Corpus.open(db) as opened:
+        application = opened.application(7)
+    assert application["status"] is None
+    assert application["note"] == "позвонить"
+
+
+def test_empty_status_keeps_the_current_stage(db, corpus, server):
+    _add(corpus, 7)
+    corpus.set_status(7, "applied", "отклик")
+    _post(server, {"id": 7, "status": "", "note": "ждём ответа", "back": "/"}, fetch=True)
+    with Corpus.open(db) as opened:
+        application = opened.application(7)
+    assert (application["status"], application["note"]) == ("applied", "ждём ответа")
 
 
 def test_no_js_redirects_to_same_view(corpus, server):

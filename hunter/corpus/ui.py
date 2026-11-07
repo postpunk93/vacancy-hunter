@@ -144,49 +144,75 @@ _STYLE = """
 * { box-sizing: border-box; }
 body { margin: 0; padding: 24px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2328; background: #f6f7f9; }
 h1 { margin: 0 0 16px; font-size: 20px; }
+:focus-visible { outline: 2px solid #0969da; outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; padding: 12px; background: #fff; border: 1px solid #d8dee4; border-radius: 8px; }
 .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #57606a; }
 .filters input, .filters select { padding: 5px 8px; font: inherit; color: inherit; background: #fff; border: 1px solid #d0d7de; border-radius: 6px; }
 .filters button { padding: 6px 14px; font: inherit; cursor: pointer; background: #1f6feb; color: #fff; border: 1px solid #1f6feb; border-radius: 6px; }
-.wrap { overflow: auto; background: #fff; border: 1px solid #d8dee4; border-radius: 8px; }
+.filters a { align-self: center; font-size: 12px; color: #0969da; }
+.wrap { max-height: calc(100vh - 200px); overflow: auto; background: #fff; border: 1px solid #d8dee4; border-radius: 8px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 7px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #eaeef2; }
 th { position: sticky; top: 0; z-index: 1; font-size: 12px; white-space: nowrap; background: #f6f8fa; }
 th a { color: #1f2328; text-decoration: none; }
 th a:hover { text-decoration: underline; }
-td.name { min-width: 240px; max-width: 420px; }
+tbody tr:hover td { background: #f6f8fa; }
+tbody tr.saved td { background: #dafbe1; }
+td.name { min-width: 220px; max-width: 380px; }
 td.name a { color: #0969da; text-decoration: none; }
 td.name a:hover { text-decoration: underline; }
-td.why, td.flags { max-width: 260px; color: #57606a; }
-td.score { font-weight: 600; white-space: nowrap; }
+td.why { max-width: 380px; color: #57606a; }
+td.why .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+td.flags { max-width: 220px; color: #57606a; }
+td.score { font-size: 15px; font-weight: 600; white-space: nowrap; }
 td.score.good { color: #1a7f37; }
 td.score.near { color: #9a6700; }
-td.score.low, td.score.none { color: #8c959f; font-weight: 400; }
+td.score.low, td.score.none { color: #57606a; font-weight: 400; }
+td.found { white-space: nowrap; color: #57606a; }
 td.stage { min-width: 150px; }
 td.stage select { width: 100%; padding: 4px 6px; font: inherit; }
 td.note { min-width: 220px; }
 td.note input { width: 100%; padding: 4px 6px; font: inherit; border: 1px solid #d0d7de; border-radius: 6px; }
 td.note .row-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 td.note button { padding: 3px 10px; font: inherit; cursor: pointer; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; }
-td.note button:disabled { cursor: default; opacity: .6; }
+td.note button.busy { cursor: progress; opacity: .6; }
 .flash { font-size: 12px; color: #1a7f37; }
-tr.saved td { background: #dafbe1; }
+.flash.error { color: #cf222e; }
 .count { margin-top: 12px; color: #57606a; }
 """
 
 _SCRIPT = """
+document.querySelectorAll(".filters select, .filters input[type=search], .filters input[type=number]").forEach(function (control) {
+  control.addEventListener("focus", function () {
+    control.dataset.previous = control.value;
+  });
+  control.addEventListener("change", function () {
+    // Автоприменение не должно молча съедать набранную заметку.
+    var dirty = Array.prototype.some.call(document.querySelectorAll("input[name=note]"), function (input) {
+      return input.value !== input.defaultValue;
+    });
+    if (dirty && !window.confirm("В строке есть несохранённая заметка. Применить фильтр и потерять её?")) {
+      if (control.dataset.previous !== undefined) control.value = control.dataset.previous;
+      return;
+    }
+    control.form.requestSubmit();
+  });
+});
 document.querySelectorAll("form.save").forEach(function (form) {
   form.addEventListener("submit", function (event) {
     event.preventDefault();
+    if (form.dataset.saving === "1") return;
     var row = form.closest("tr");
     var stage = form.querySelector("select[name=status]");
-    var back = form.querySelector("input[name=back]");
     var button = row.querySelector("button[type=submit]");
     var flash = row.querySelector(".flash");
-    // Этап поменялся — после сохранения перечитываем список с теми же
-    // фильтрами: строка может из них выпасть или войти в них.
-    var stageChanged = stage.value !== form.dataset.status;
-    button.disabled = true;
+    var note = row.querySelector("input[name=note]");
+    var label = stage.options[stage.selectedIndex].textContent;
+    form.dataset.saving = "1";
+    button.classList.add("busy");
+    if (form._flashTimer) clearTimeout(form._flashTimer);
+    flash.classList.remove("error");
     flash.textContent = "";
     fetch("/save", {
       method: "POST",
@@ -194,30 +220,44 @@ document.querySelectorAll("form.save").forEach(function (form) {
       body: new URLSearchParams(new FormData(form))
     }).then(function (response) {
       if (!response.ok) {
-        return response.text().then(function (text) { flash.textContent = text; });
+        return response.text().then(function (text) {
+          flash.textContent = text || "Не удалось сохранить";
+          flash.classList.add("error");
+        });
       }
-      if (stageChanged) {
-        window.location.href = back.value + "#" + row.id;
-        return;
-      }
+      // Строка остаётся на месте: перезагрузка выбрасывала из фильтра
+      // в начало списка, а подтверждения сохранения не было видно.
+      form.dataset.status = stage.value;
+      var blank = stage.querySelector('option[value=""]');
+      if (blank && stage.value) blank.remove();
+      if (note) note.defaultValue = note.value;
       row.classList.add("saved");
-      flash.textContent = "сохранено";
-      setTimeout(function () {
+      flash.textContent = stage.value ? "Этап: " + label : "Заметка сохранена";
+      form._flashTimer = setTimeout(function () {
         row.classList.remove("saved");
         flash.textContent = "";
-      }, 2000);
+      }, 3000);
     }).catch(function () {
-      flash.textContent = "не удалось сохранить";
+      flash.textContent = "Не удалось сохранить: нет связи с таблицей";
+      flash.classList.add("error");
     }).finally(function () {
-      button.disabled = false;
+      form.dataset.saving = "";
+      button.classList.remove("busy");
     });
   });
 });
 """
 
 _HEADERS = (
-    "Название", "Компания", "Оценка", "Почему", "Флаги", "Роль", "Этап", "Заметка", "Найдена",
+    "Название", "Оценка", "Компания", "Почему", "Флаги", "Роль", "Этап", "Заметка", "Найдена",
 )
+
+_ROLE_LABELS = {
+    "author": "автор / редактор",
+    "vibecoder": "вайбкодер",
+    "content-ai": "контент + ИИ",
+    "promo": "продвижение",
+}
 
 _SORT_KEYS = {
     "Название": "name",
@@ -239,6 +279,21 @@ def _short(value, limit: int = 120) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def _role_text(role) -> str:
+    text = _plain(role)
+    return _ROLE_LABELS.get(text, text)
+
+
+def _found_date(value) -> tuple[str, str]:
+    """Короткая дата для колонки и полная — для title."""
+    text = _plain(value)
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return text[:10], text
+    return moment.strftime("%d.%m"), moment.strftime("%d.%m.%Y")
+
+
 def _flags_text(raw) -> str:
     if not raw:
         return ""
@@ -253,7 +308,10 @@ def _flags_text(raw) -> str:
 
 def _score_cell(score, threshold: int) -> str:
     if score is None:
-        return '<td class="score none">—</td>'
+        return (
+            '<td class="score none"><span aria-hidden="true">—</span>'
+            '<span class="sr-only">без оценки</span></td>'
+        )
     if score >= threshold:
         kind = "good"
     elif score >= 3:
@@ -269,20 +327,30 @@ def _sort_header(label: str, filters: Filters) -> str:
     query = filters.query(sort=key, desc=desc)
     href = "/" + ("?" + query if query else "")
     arrow = ""
+    aria_sort = ""
     if filters.sort == key:
         arrow = " ▼" if filters.desc else " ▲"
-    return f'<th><a href="{_esc(href)}">{label}{arrow}</a></th>'
+        aria_sort = ' aria-sort="descending"' if filters.desc else ' aria-sort="ascending"'
+    return (
+        f'<th scope="col"{aria_sort}><a href="{_esc(href)}">{label}{arrow}</a></th>'
+    )
 
 
-def _stage_select(row) -> str:
+def _stage_select(row, label: str) -> str:
     current = row["status"]
-    options = ['<option value="">новая</option>']
+    options = []
+    if current is None:
+        options.append('<option value="" selected>не задан</option>')
     for status in STATUSES:
         selected = " selected" if status == current else ""
         options.append(
             f'<option value="{status}"{selected}>{_esc(STATUS_LABELS[status])}</option>'
         )
-    return '<select name="status">' + "".join(options) + "</select>"
+    return (
+        f'<select name="status" aria-label="{_esc(label)}">'
+        + "".join(options)
+        + "</select>"
+    )
 
 
 def _filter_form(filters: Filters) -> str:
@@ -300,6 +368,7 @@ def _filter_form(filters: Filters) -> str:
     score = "" if filters.min_score is None else str(filters.min_score)
     sort = _esc(filters.sort)
     desc = "1" if filters.desc else "0"
+    reset = "" if filters == Filters() else '<a href="/">Сбросить фильтры</a>'
 
     return (
         '<form class="filters" method="get" action="/">'
@@ -310,7 +379,8 @@ def _filter_form(filters: Filters) -> str:
         f'<label>Этап<select name="status">{stages}</select></label>'
         f'<label>Поиск<input type="search" name="q" value="{_esc(filters.q)}"></label>'
         '<button type="submit">Показать</button>'
-        "</form>"
+        + reset
+        + "</form>"
     )
 
 
@@ -318,26 +388,30 @@ def _row(row, *, filters: Filters, threshold: int) -> str:
     back = "/" + ("?" + filters.query() if filters.query() else "")
     why = _plain(row["why"])
     flags = _flags_text(row["flags"])
+    name = _plain(row["name"])
+    found, found_title = _found_date(row["first_seen_at"])
+    stage_label = f"Этап отклика для вакансии «{name}»"
+    note_label = f"Заметка к вакансии «{name}»"
     return (
         f'<tr id="v-{_esc(row["id"])}">'
         f'<td class="name"><a href="{_esc(row["url"])}" target="_blank" rel="noopener">'
-        f'{_esc(row["name"])}</a></td>'
-        f'<td>{_esc(row["company"])}</td>'
+        f"{_esc(name)}</a></td>"
         + _score_cell(row["score"], threshold)
-        + f'<td class="why" title="{_esc(why)}">{_esc(_short(why))}</td>'
+        + f'<td>{_esc(row["company"])}</td>'
+        f'<td class="why"><span class="clamp" title="{_esc(why)}">{_esc(why)}</span></td>'
         f'<td class="flags" title="{_esc(flags)}">{_esc(_short(flags))}</td>'
-        f'<td>{_esc(row["role"])}</td>'
+        f'<td>{_esc(_role_text(row["role"]))}</td>'
         f'<td class="stage"><form class="save" id="f-{_esc(row["id"])}" method="post" action="/save"'
         f' data-status="{_esc(_plain(row["status"]))}">'
         f'<input type="hidden" name="id" value="{_esc(row["id"])}">'
         f'<input type="hidden" name="back" value="{_esc(back)}">'
-        + _stage_select(row)
+        + _stage_select(row, stage_label)
         + "</form></td>"
         f'<td class="note"><input type="text" name="note" form="f-{_esc(row["id"])}" '
-        f'value="{_esc(row["note"])}">'
+        f'value="{_esc(row["note"])}" placeholder="что дальше" aria-label="{_esc(note_label)}">'
         f'<div class="row-actions"><button type="submit" form="f-{_esc(row["id"])}">Сохранить</button>'
-        '<span class="flash"></span></div></td>'
-        f'<td>{_esc(_plain(row["first_seen_at"])[:10])}</td>'
+        '<span class="flash" role="status" aria-live="polite" aria-atomic="true"></span></div></td>'
+        f'<td class="found" title="{_esc(found_title)}">{_esc(found)}</td>'
         "</tr>"
     )
 
@@ -351,11 +425,14 @@ def render_page(
         if label in _SORT_KEYS:
             headers.append(_sort_header(label, filters))
         else:
-            headers.append(f"<th>{label}</th>")
+            headers.append(f'<th scope="col">{label}</th>')
 
     body = "".join(_row(row, filters=filters, threshold=threshold) for row in rows)
     if not rows:
-        body = '<tr><td colspan="9" class="count">Ничего не найдено</td></tr>'
+        body = (
+            '<tr><td colspan="9" class="count">Ничего не найдено. '
+            '<a href="/">Сбросить фильтры</a></td></tr>'
+        )
 
     return (
         "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
@@ -363,7 +440,9 @@ def render_page(
         "<title>Вакансии</title><style>" + _STYLE + "</style></head><body>"
         "<h1>Вакансии</h1>"
         + _filter_form(filters)
-        + '<div class="wrap"><table><thead><tr>'
+        + '<div class="wrap"><table>'
+        '<caption class="sr-only">Вакансии: оценка по профилю, этап отклика и заметка</caption>'
+        "<thead><tr>"
         + "".join(headers)
         + "</tr></thead><tbody>"
         + body
@@ -434,12 +513,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(400, "Неверная вакансия")
             return
         status = field("status")
-        if not status:
-            self._respond(400, "Сначала выберите этап")
-            return
-        if status not in STATUSES:
+        if status and status not in STATUSES:
             self._respond(400, "Неверный этап")
             return
+        # Пустой этап — «не менять»: заметку можно сохранить и до решения
+        # по вакансии. Неверный этап по-прежнему отклоняется.
+        stage = status or None
         note = field("note")
         back = field("back", "/") or "/"
         if not back.startswith("/") or back.startswith("//") or "\\" in back:
@@ -448,7 +527,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             with Corpus.open(self.db) as corpus:
-                corpus.set_status(vacancy_id, status, note)
+                corpus.set_status(vacancy_id, stage, note)
         except CorpusError as exc:
             self._respond(400, str(exc))
             return
@@ -484,6 +563,14 @@ def serve(
     db = Path(db)
     if not db.exists():
         print(f"База {db} не найдена. Сначала выполните vacancies init.", file=sys.stderr)
+        return 2
+    # Таблица читает базу в режиме «только чтение» и старую схему не примет.
+    # Один раз мигрируем здесь, чтобы после обновления кода не было 500.
+    try:
+        with Corpus.open(db):
+            pass
+    except CorpusError as exc:
+        print(f"Не удалось обновить схему базы: {exc}", file=sys.stderr)
         return 2
     try:
         server = make_server(db, port, host=host, threshold=threshold)
