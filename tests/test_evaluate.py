@@ -497,3 +497,18 @@ def test_rescore_rejects_nonpositive_days(rescore_setup, capsys):
     db, config, _ = rescore_setup
     assert main(rescore_argv(db, config, "--days", "0")) == 2
     assert "--days" in capsys.readouterr().err
+
+
+def test_rescore_saves_scores_under_the_platform_key(tmp_path):
+    """Ключ оценки — площадка и внешний id: иначе оценка superjob ляжет
+    под hh:<суррогат> и вьюха latest_scores её не найдёт."""
+    db = tmp_path / "me.db"
+    cached_database(db, [(5, "Редактор", 1, "текст", None)])
+
+    with Store(db) as store:
+        store.corpus._conn.execute(
+            "UPDATE vacancies SET source = 'superjob', external_id = '52295791' WHERE id = 5")
+        store.corpus._conn.commit()
+        rescore(store, ask=Ask({"superjob:52295791": 7}), criteria=CRITERIA, days=7)
+        keys = {row[0] for row in store.corpus._conn.execute("SELECT key FROM scores")}
+        assert keys == {"superjob:52295791"}
