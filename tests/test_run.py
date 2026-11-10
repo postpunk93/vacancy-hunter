@@ -1181,3 +1181,21 @@ def test_repeated_page_stops_the_pass_pagination():
              send=Sender(), now=NOW)
 
     assert len(calls) == 2, "вторая страница та же — третью не запрашиваем"
+
+
+def test_captcha_blocks_the_pass_instead_of_crashing_it():
+    config = Config(
+        sources=("rabota",),
+        queries=(SearchQuery(name="Редактор", text="редактор"),),
+    )
+    store = Store(":memory:")
+    sender = Sender()
+
+    def fetch_page(url):
+        return "<html>Подтвердите, что вы не робот</html>"
+
+    code = run_pass(config=config, store=store, fetch_page=fetch_page, send=sender, now=NOW)
+
+    text = "\n".join(sender.messages)
+    assert code == 3, "капча — блокировка, а не непредвиденная ошибка"
+    assert "rabota" in text and "заблокировал" in text

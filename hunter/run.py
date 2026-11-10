@@ -33,7 +33,7 @@ from .filters import (
 from .models import Score, SearchQuery, Vacancy
 from .parse import ParseError
 from .scoring import Criteria, ask_model, load_criteria, score_pass
-from .platforms import get
+from .platforms import Captcha, get
 from .platforms.base import vacancy_card_row
 from .store import Store
 from .telegram import TelegramError, send_messages
@@ -94,7 +94,7 @@ def _collect(
                 url = platform.search_url(query_for_url, page)
                 try:
                     page_html = fetch_page(url)
-                except Blocked as exc:
+                except (Blocked, Captcha) as exc:
                     log.error("Блокировка (%s): %s", source, exc)
                     blocked_sources.add(source)
                     warnings.append(f"{source} заблокировал запросы: {exc}")
@@ -106,6 +106,13 @@ def _collect(
 
                 try:
                     found = platform.parse_cards(page_html)
+                except Captcha as exc:
+                    # Заглушка вместо выдачи приходит с кодом 200: для владельца
+                    # это то же событие, что блокировка, — площадка не пустила.
+                    log.error("Капча (%s): %s", source, exc)
+                    blocked_sources.add(source)
+                    warnings.append(f"{source} заблокировал запросы: {exc}")
+                    break
                 except ParseError as exc:
                     log.error("Разбор не удался: %s", exc)
                     if debug_dir is not None:
