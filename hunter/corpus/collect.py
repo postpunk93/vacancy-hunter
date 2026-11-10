@@ -6,14 +6,12 @@ from typing import Callable
 from ..fetch import Blocked, FetchError, NotFound
 from ..models import SearchQuery
 from ..parse import ParseError
-from ..sources import build_url
+from ..platforms import Captcha, get
 from ..text import plural
-from .extract import VACANCY_URL, Captcha, card_row, parse_detail, search_cards
 from .store import Corpus
 
 FetchPage = Callable[[str], str]
 
-ITEMS_PER_PAGE = 50  # совпадает с items_on_page в sources.build_url
 MANUAL_QUERY = "manual"
 
 EXIT_OK = 0
@@ -60,18 +58,19 @@ class CollectReport:
 
 
 def collect(corpus: Corpus, fetch_page: FetchPage, query: SearchQuery, role: str,
-            wait: Callable[[], None] = _no_wait) -> CollectReport:
+            wait: Callable[[], None] = _no_wait, *, source: str = "hh") -> CollectReport:
     report = CollectReport(role)
+    platform = get(source)
     counted: set[int] = set()
     for page in range(query.max_pages):
         if page:
             wait()
-        url = build_url("hh", query, page)
+        url = platform.search_url(query, page)
         try:
-            cards = search_cards(fetch_page(url))
+            cards = platform.parse_cards(fetch_page(url))
             # Сначала разбираем всю страницу, потом пишем: битая карточка
             # не оставит полстраницы в базе.
-            rows = [card_row(raw) for raw in cards]
+            rows = [card.row for card in cards]
         except (Blocked, Captcha) as exc:
             report.blocked = str(exc)
             break
@@ -97,7 +96,7 @@ def collect(corpus: Corpus, fetch_page: FetchPage, query: SearchQuery, role: str
                 report.cards += 1
                 report.new += is_new
         report.pages += 1
-        if len(cards) < ITEMS_PER_PAGE:
+        if len(cards) < platform.page_size:
             break
     return report
 
@@ -131,7 +130,7 @@ class FetchReport:
 
 def fetch_details(corpus: Corpus, fetch_page: FetchPage, ids: list[int], *,
                   role: str | None = None, refresh: bool = False,
-                  wait: Callable[[], None] = _no_wait) -> FetchReport:
+                  wait: Callable[[], None] = _no_wait, source: str = "hh") -> FetchReport:
     report = FetchReport()
     requested = False
     for index, vacancy_id in enumerate(ids):
@@ -145,7 +144,8 @@ def fetch_details(corpus: Corpus, fetch_page: FetchPage, ids: list[int], *,
             wait()
         requested = True
         try:
-            detail = parse_detail(fetch_page(VACANCY_URL.format(id=vacancy_id)))
+            platform = get(source)
+            detail = platform.parse_detail(fetch_page(platform.vacancy_url(str(vacancy_id))))
         except (Blocked, Captcha) as exc:
             report.blocked = str(exc)
             report.not_reached = list(ids[index:])
@@ -167,6 +167,6 @@ def fetch_details(corpus: Corpus, fetch_page: FetchPage, ids: list[int], *,
 
         corpus.save_detail(detail)
         if role:
-            corpus.add_hit(detail.vacancy_id, role, MANUAL_QUERY)
+            corpus.add_hit(corpus.find(detail.source, detail.external_id), role, MANUAL_QUERY)
         report.fetched.append(vacancy_id)
     return report

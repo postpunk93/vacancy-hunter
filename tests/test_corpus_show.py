@@ -1,6 +1,6 @@
 import pytest
 
-from hunter.corpus.extract import card_row, parse_detail
+from hunter.platforms.hh import card_row, parse_detail
 from hunter.corpus.show import render_table, render_vacancy
 from hunter.corpus.store import Corpus
 from tests.factories import search_card, vacancy_page

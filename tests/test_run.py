@@ -8,7 +8,7 @@ import pytest
 
 from hunter import run as run_module
 from hunter.config import Config
-from hunter.corpus.extract import vacancy_card_row
+from hunter.platforms.base import vacancy_card_row
 from hunter.fetch import Blocked, FetchError
 from hunter.models import SearchQuery
 from hunter.run import EXIT_BAD_CONFIG, EXIT_UNEXPECTED, run_pass
@@ -35,7 +35,11 @@ def _card(vacancy_id, area, timestamp=1700000000):
         "company": {"visibleName": "Roobinium"},
         "area": {"name": area},
         "links": {"desktop": f"https://hh.ru/vacancy/{vacancy_id}"},
-        "publicationTime": {"@timestamp": timestamp},
+        # Как на живой странице: дата — ISO-строка в "$", epoch остался рядом.
+        "publicationTime": {
+            "$": datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat(),
+            "@timestamp": timestamp,
+        },
         "compensation": {
             "from": 40000, "to": 300000, "currencyCode": "RUR",
             "gross": False, "mode": "MONTH",

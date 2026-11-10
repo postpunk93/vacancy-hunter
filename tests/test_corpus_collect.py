@@ -6,7 +6,7 @@ from hunter.corpus.collect import (
 from hunter.corpus.store import Corpus
 from hunter.fetch import Blocked, FetchError, NotFound
 from hunter.models import SearchQuery
-from hunter.sources import build_url
+from hunter.platforms import get
 from tests.factories import search_card, search_page, vacancy_page
 
 QUERY = SearchQuery(name="backend", text="python", area=113, only_with_salary=False,
@@ -15,7 +15,7 @@ CAPTCHA = "<html><body>Вы не робот?</body></html>"
 
 
 def page_url(n):
-    return build_url("hh", QUERY, n)
+    return get("hh").search_url(QUERY, n)
 
 
 def vacancy_url(vacancy_id):

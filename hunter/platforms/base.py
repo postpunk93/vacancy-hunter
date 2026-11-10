@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -84,6 +85,35 @@ class Detail:
     key_skills: list[str]
     status: str
     raw: dict
+
+
+def vacancy_card_row(v: Vacancy) -> dict:
+    """Вакансия, разобранная проходом, → колонки vacancies. Проход видит меньше,
+    чем полная карточка: чего нет в Vacancy, остаётся NULL и дополнится
+    при сборе корпуса или скачивании страницы."""
+    return {
+        "source": v.source,
+        "external_id": v.vacancy_id,
+        "name": v.name,
+        "company": v.company,
+        "company_id": None,
+        "url": v.url,
+        "area": v.area,
+        "published_at": v.published_at.isoformat() if v.published_at else None,
+        "salary_from": v.salary_from,
+        "salary_to": v.salary_to,
+        "currency": v.currency,
+        "gross": None if v.gross is None else int(bool(v.gross)),
+        "salary_frequency": None,
+        "experience": v.experience,
+        "work_formats": json.dumps(list(v.work_formats)),
+        "employment_form": None,
+        "employer_trusted": None,
+        "employer_category": None,
+        "antifraud_power": None,
+        "responses_count": None,
+        "card_json": None,
+    }
 
 
 class Platform(Protocol):

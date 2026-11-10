@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime, timedelta, timezone
 
-from hunter.corpus.extract import vacancy_card_row
+from hunter.platforms.base import vacancy_card_row
 from hunter.corpus.store import Corpus
 from hunter.models import FullText
 from hunter.store import Store

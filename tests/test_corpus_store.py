@@ -2,7 +2,8 @@ import sqlite3
 
 import pytest
 
-from hunter.corpus.extract import card_row, parse_detail, vacancy_card_row
+from hunter.platforms.base import vacancy_card_row
+from hunter.platforms.hh import card_row, parse_detail
 from hunter.corpus.store import _MIGRATIONS, SCHEMA_VERSION, STATUS_LABELS, STATUSES, Corpus, CorpusError
 from tests.factories import make_vacancy, search_card, vacancy_page
 

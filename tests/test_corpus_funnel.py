@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from hunter.corpus.extract import vacancy_card_row
+from hunter.platforms.base import vacancy_card_row
 from hunter.corpus.funnel import funnel_rows, reminders
 from hunter.corpus.store import Corpus, CorpusError
 from tests.factories import make_vacancy

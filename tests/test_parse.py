@@ -1,10 +1,10 @@
 import json
-from datetime import timezone
 from pathlib import Path
 
 import pytest
 
-from hunter.parse import ParseError, extract_state, parse_search_page
+from hunter.parse import ParseError, extract_state
+from hunter.platforms import get
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -13,8 +13,13 @@ def fixture(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
+def cards(name, source="hh"):
+    return get(source).parse_cards(fixture(name))
+
+
 def test_parses_every_card_from_the_real_page():
-    vacancies = parse_search_page(fixture("hh_search_python_msk.html"), "hh")
+    found = cards("hh_search_python_msk.html")
+    vacancies = [card.vacancy for card in found]
 
     assert len(vacancies) == 51
     assert sum(v.is_ad for v in vacancies) == 1
@@ -22,16 +27,14 @@ def test_parses_every_card_from_the_real_page():
 
 
 def test_advertising_card_is_flagged_not_dropped():
-    vacancies = parse_search_page(fixture("hh_search_python_msk.html"), "hh")
+    first = cards("hh_search_python_msk.html")[0].vacancy
 
-    first = vacancies[0]
     assert first.vacancy_id == "114811554"
-    assert first.is_ad is True, "отсевом рекламы занимается filters, не parse"
+    assert first.is_ad is True, "отсевом рекламы занимается filters, не площадка"
 
 
 def test_fields_are_filled_from_the_page():
-    vacancies = parse_search_page(fixture("hh_search_sorted_with_salary.html"), "hh")
-    v = vacancies[0]
+    v = cards("hh_search_sorted_with_salary.html")[0].vacancy
 
     assert v.source == "hh"
     assert v.vacancy_id.isdigit()
@@ -39,12 +42,13 @@ def test_fields_are_filled_from_the_page():
     assert v.company
     assert v.url.startswith("https://")
     assert "/vacancy/" in v.url
+    assert v.published_at is not None
     assert v.published_at.tzinfo is not None
     assert v.published_at.year == 2026
 
 
 def test_salary_bounds_currency_and_mode_are_captured():
-    vacancies = parse_search_page(fixture("hh_search_sorted_with_salary.html"), "hh")
+    vacancies = [card.vacancy for card in cards("hh_search_sorted_with_salary.html")]
 
     assert all(v.has_salary for v in vacancies), "страница снята с only_with_salary"
     assert {v.currency for v in vacancies} == {"RUR", "USD"}
@@ -56,7 +60,8 @@ def test_salary_bounds_currency_and_mode_are_captured():
 def test_zarplata_search_page_parses_every_card():
     """Страница выдачи zarplata разбирается целиком. Исходный баг был в адресе
     выдачи, его ловит тест URL, а не этот."""
-    vacancies = parse_search_page(fixture("zarplata_search_python.html"), "zarplata")
+    found = cards("zarplata_search_python.html", "zarplata")
+    vacancies = [card.vacancy for card in found]
 
     assert len(vacancies) == 50
     assert {v.source for v in vacancies} == {"zarplata"}
@@ -65,7 +70,7 @@ def test_zarplata_search_page_parses_every_card():
 
 
 def test_missing_compensation_becomes_empty_bounds():
-    vacancies = parse_search_page(fixture("zarplata_search_python.html"), "zarplata")
+    vacancies = [card.vacancy for card in cards("zarplata_search_python.html", "zarplata")]
 
     v = next(v for v in vacancies if v.vacancy_id == "139289794")
     assert v.source == "zarplata"
@@ -75,7 +80,7 @@ def test_missing_compensation_becomes_empty_bounds():
 
 
 def test_work_formats_are_flattened_into_a_tuple():
-    vacancies = parse_search_page(fixture("hh_search_sorted_with_salary.html"), "hh")
+    vacancies = [card.vacancy for card in cards("hh_search_sorted_with_salary.html")]
     formats = {f for v in vacancies for f in v.work_formats}
 
     assert "REMOTE" in formats
@@ -83,9 +88,18 @@ def test_work_formats_are_flattened_into_a_tuple():
     assert all(isinstance(v.work_formats, tuple) for v in vacancies)
 
 
-def test_page_without_the_state_template_raises_a_loud_error():
+def test_page_without_the_state_template_is_a_parse_error():
+    """Пустая страница без признаков капчи — редизайн: громкая ошибка разбора,
+    а не «заблокировано», иначе владелец будет ждать часа впустую."""
     with pytest.raises(ParseError, match="HH-Lux-InitialState"):
-        parse_search_page("<html><body>Ничего интересного</body></html>", "hh")
+        get("hh").parse_cards("<html><body>Ничего интересного</body></html>")
+
+
+def test_captcha_page_without_the_state_template_is_a_captcha():
+    from hunter.platforms.base import Captcha
+
+    with pytest.raises(Captcha, match="капчу"):
+        get("hh").parse_cards("<html><body>Подтвердите, что вы не робот</body></html>")
 
 
 def test_broken_json_in_the_state_raises():
@@ -95,9 +109,8 @@ def test_broken_json_in_the_state_raises():
 
 def test_state_without_search_result_raises():
     with pytest.raises(ParseError, match="vacancySearchResult"):
-        parse_search_page(
-            '<template style="display:none" id="HH-Lux-InitialState">{"other": 1}</template>',
-            "hh",
+        get("hh").parse_cards(
+            '<template style="display:none" id="HH-Lux-InitialState">{"other": 1}</template>'
         )
 
 
@@ -112,7 +125,7 @@ _GOOD_CARD = {
     "company": {"visibleName": "Тест"},
     "area": {"name": "Москва"},
     "links": {"desktop": "https://hh.ru/vacancy/1"},
-    "publicationTime": {"@timestamp": 1700000000},
+    "publicationTime": {"$": "2026-09-01T00:00:00+03:00"},
     "compensation": {"from": 100000},
 }
 
@@ -123,15 +136,15 @@ def test_renamed_vacancy_id_field_raises_parse_error():
     card["vacancyIdV2"] = 1
 
     with pytest.raises(ParseError, match="KeyError"):
-        parse_search_page(_state_with(card), "hh")
+        get("hh").parse_cards(_state_with(card))
 
 
-def test_timestamp_as_a_string_raises_parse_error():
+def test_unreadable_publication_date_raises_parse_error():
     card = dict(_GOOD_CARD)
-    card["publicationTime"] = {"@timestamp": "2026-09-01T00:00:00"}
+    card["publicationTime"] = {"$": "1 сентября"}
 
-    with pytest.raises(ParseError):
-        parse_search_page(_state_with(card), "hh")
+    with pytest.raises(ParseError, match="ValueError"):
+        get("hh").parse_cards(_state_with(card))
 
 
 def test_company_as_a_plain_string_raises_parse_error():
@@ -139,11 +152,11 @@ def test_company_as_a_plain_string_raises_parse_error():
     card["company"] = "Тест"
 
     with pytest.raises(ParseError, match="AttributeError"):
-        parse_search_page(_state_with(card), "hh")
+        get("hh").parse_cards(_state_with(card))
 
 
 def test_experience_code_is_captured():
-    vacancies = parse_search_page(fixture("hh_search_sorted_with_salary.html"), "hh")
+    vacancies = [card.vacancy for card in cards("hh_search_sorted_with_salary.html")]
 
     assert {v.experience for v in vacancies} == {
         "noExperience", "between1And3", "between3And6", "moreThan6",

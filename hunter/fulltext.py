@@ -4,7 +4,7 @@ import logging
 import random
 from typing import Callable
 
-from .corpus.extract import VACANCY_URL, Captcha, parse_detail
+from .platforms import Captcha, get
 from .fetch import Blocked, FetchError
 from .models import FullText, Vacancy
 from .parse import ParseError
@@ -45,10 +45,10 @@ def fetch_texts(
         if requested:
             pause(jitter(*TEXT_PAUSE_RANGE))
         requested = True
-        # id у zarplata те же, что у hh (кросспостинг), а страница — только на hh.
-        url = VACANCY_URL.format(id=vacancy.vacancy_id)
+        platform = get(vacancy.source)
+        url = platform.vacancy_url(vacancy.vacancy_id)
         try:
-            detail = parse_detail(fetch_page(url))
+            detail = platform.parse_detail(fetch_page(url))
         except (Blocked, Captcha) as exc:
             log.error("Скачивание текстов остановлено: %s", exc)
             blocked = str(exc)

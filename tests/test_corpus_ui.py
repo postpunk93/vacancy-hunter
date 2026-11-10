@@ -10,7 +10,7 @@ import pytest
 from hunter import paths
 from hunter.corpus import ui
 from hunter.corpus.cli import main
-from hunter.corpus.extract import vacancy_card_row
+from hunter.platforms.base import vacancy_card_row
 from hunter.corpus.store import Corpus
 from hunter.corpus.ui import Filters, make_server, parse_filters, render_page, select_rows
 from hunter.export import export_rows

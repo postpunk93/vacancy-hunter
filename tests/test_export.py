@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from openpyxl import load_workbook
 
-from hunter.corpus.extract import vacancy_card_row
+from hunter.platforms.base import vacancy_card_row
 from hunter.corpus.store import STATUS_LABELS, Corpus
 from hunter.export import export_rows, write_xlsx
 from tests.factories import make_vacancy

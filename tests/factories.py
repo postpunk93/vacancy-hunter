@@ -4,7 +4,7 @@ import html as html_module
 import json
 from datetime import datetime, timezone
 
-from hunter.corpus.extract import Detail, vacancy_card_row
+from hunter.platforms.base import Detail, vacancy_card_row
 from hunter.models import Vacancy
 
 _DEFAULTS = dict(
@@ -28,7 +28,12 @@ _DEFAULTS = dict(
 
 def make_vacancy(**overrides) -> Vacancy:
     """Конструктор вакансии для тестов: задавайте только то, что проверяете."""
-    return Vacancy(**{**_DEFAULTS, **overrides})
+    fields = dict(_DEFAULTS)
+    # Адрес следует за id, если его не задали явно: иначе тест на url врал бы.
+    vacancy_id = str(overrides.get("vacancy_id", fields["vacancy_id"]))
+    fields["url"] = f"https://hh.ru/vacancy/{vacancy_id}"
+    fields.update(overrides)
+    return Vacancy(**fields)
 
 
 def state_page(state: dict) -> str:
@@ -84,7 +89,8 @@ def vacancy_page(vacancy_id: int, **overrides) -> str:
 def make_detail(vacancy_id: int = 134991226, **overrides) -> Detail:
     """Страница вакансии для тестов: строка — как у вакансии из выдачи, поля меняются точечно."""
     fields = dict(
-        vacancy_id=vacancy_id,
+        source="hh",
+        external_id=str(vacancy_id),
         row=vacancy_card_row(make_vacancy(vacancy_id=str(vacancy_id))),
         description="Описание",
         key_skills=[],

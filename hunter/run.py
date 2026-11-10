@@ -18,7 +18,6 @@ from .config import (
     load_secrets,
     with_search_period,
 )
-from .corpus.extract import vacancy_card_row
 from .digest import render, render_console
 from .fetch import Blocked, FetchError, get_html, new_client
 from .filters import (
@@ -31,9 +30,10 @@ from .filters import (
     sort_by_score,
 )
 from .models import Score, SearchQuery, Vacancy
-from .parse import ParseError, parse_search_page
+from .parse import ParseError
 from .scoring import Criteria, ask_model, load_criteria, score_pass
-from .sources import build_url, hh_period
+from .platforms import get
+from .platforms.base import vacancy_card_row
 from .store import Store
 from .telegram import TelegramError, send_messages
 
@@ -43,10 +43,6 @@ PURGE_DAYS = 90
 REQUEST_PAUSE_SECONDS = 1.5
 # Заглушка вместо даты публикации: вакансия без даты в сортировке уходит в конец.
 _EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
-# Столько карточек на странице выдачи (items_on_page в sources.build_url).
-# Страница короче — значит, выдача кончилась и листать дальше незачем.
-PAGE_SIZE = 50
-
 EXIT_OK = 0
 EXIT_TELEGRAM_FAILED = 1
 EXIT_BAD_CONFIG = 2
@@ -77,7 +73,8 @@ def _collect(
                     pause(REQUEST_PAUSE_SECONDS)
                 first_request = False
 
-                url = build_url(source, query, page=page)
+                platform = get(source)
+                url = platform.search_url(query, page)
                 try:
                     page_html = fetch_page(url)
                 except Blocked as exc:
@@ -91,7 +88,7 @@ def _collect(
                     continue
 
                 try:
-                    found = parse_search_page(page_html, source)
+                    found = platform.parse_cards(page_html)
                 except ParseError as exc:
                     log.error("Разбор не удался: %s", exc)
                     if debug_dir is not None:
@@ -105,8 +102,8 @@ def _collect(
                         f"похоже, сайт сменил вёрстку"
                     )
                     break
-                collected.extend(found)
-                if len(found) < PAGE_SIZE:
+                collected.extend(card.vacancy for card in found)
+                if len(found) < platform.page_size:
                     break
 
         groups.append((query.name, collected))
@@ -175,7 +172,12 @@ def run_pass(
     cleaned: list[Group] = []
     for query, (name, vacancies) in zip(config.queries, groups):
         vacancies = drop_ads(vacancies)
-        if hh_period(query.search_period) != query.search_period:
+        # Площадка отдаёт период не короче запрошенного (hh округляет вверх,
+        # superjob обрезает до недели) — лишние дни отсекаем здесь.
+        if any(
+            get(source).search_period(query.search_period) != query.search_period
+            for source in config.sources
+        ):
             vacancies = drop_published_before(
                 vacancies, now - timedelta(days=query.search_period)
             )
