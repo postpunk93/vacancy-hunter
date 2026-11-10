@@ -199,8 +199,8 @@ class Rabota:
         search = (state.get("rabota") or {}).get("search")
         if not isinstance(search, dict):
             raise ParseError("в состоянии rabota нет state.rabota.search")
-        if not search.get("totalVacancies"):
-            # Пустая выдача — законный ответ: ld+json у неё тоже нет.
+        if search.get("totalVacancies") == 0:
+            # Пустая выдача — законный ответ, и ld+json у неё тоже нет.
             return []
         vacancies = search.get("vacancies")
         if not isinstance(vacancies, list):

@@ -182,3 +182,12 @@ def test_unsupported_lists_what_the_site_ignores():
         experience=("between1And3",), work_format="hybrid",
     ))
     assert set(ignored) == {"area", "only_with_salary", "experience", "work_format"}
+
+
+def test_search_without_total_vacancies_is_a_parse_error():
+    """Пустая выдача — это явный ноль, а не пропавшее поле: иначе смена
+    формата выглядела бы как «вакансий нет»."""
+    page = _nuxt_page({"state": {"rabota": {"search": {}}}})
+
+    with pytest.raises(ParseError):
+        get("rabota").parse_cards(page)
