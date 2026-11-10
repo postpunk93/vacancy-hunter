@@ -15,3 +15,5 @@ state.db.bak*
 me/
 .claude/worktrees/
 .claude/settings.local.json
+.cortexkit/
+.impeccable/
