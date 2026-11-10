@@ -41,6 +41,8 @@ log = logging.getLogger("hunter")
 
 PURGE_DAYS = 90
 REQUEST_PAUSE_SECONDS = 1.5
+# Заглушка вместо даты публикации: вакансия без даты в сортировке уходит в конец.
+_EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
 # Столько карточек на странице выдачи (items_on_page в sources.build_url).
 # Страница короче — значит, выдача кончилась и листать дальше незачем.
 PAGE_SIZE = 50
@@ -238,7 +240,7 @@ def run_pass(
                     low.append(vacancy)
             if passed:
                 digest_groups.append((name, passed))
-        nearby.sort(key=lambda v: (-scores[v.key].value, -v.published_at.timestamp()))
+        nearby.sort(key=lambda v: (-scores[v.key].value, -(v.published_at or _EPOCH).timestamp()))
 
     if console or echo is not None:
         # Тишина после прохода непонятна тому, кто его запустил: сводка

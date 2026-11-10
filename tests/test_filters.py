@@ -134,6 +134,19 @@ def test_vacancies_published_before_the_cutoff_are_dropped():
     assert drop_published_before([old, edge, new], at(2)) == [edge, new]
 
 
+def test_drop_published_before_keeps_unknown_date():
+    unknown = make_vacancy(vacancy_id="1", published_at=None)
+
+    assert drop_published_before([unknown], at(2)) == [unknown]
+
+
+def test_sort_by_freshness_puts_unknown_date_last():
+    unknown = make_vacancy(vacancy_id="1", published_at=None)
+    fresh = make_vacancy(vacancy_id="2", published_at=at(3))
+
+    assert sort_by_freshness([unknown, fresh]) == [fresh, unknown]
+
+
 def test_sort_by_score_descending_unscored_last():
     from hunter.filters import sort_by_score
     from hunter.models import Score

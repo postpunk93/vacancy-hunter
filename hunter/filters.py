@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .models import UNKNOWN_COMPANY, UNKNOWN_VACANCY_NAME, Score, Vacancy
 from .text import plural
 
 Group = tuple[str, list[Vacancy]]
+
+# Заглушка вместо даты публикации: вакансия без даты в сортировке уходит в конец.
+_EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
 
 
 def drop_ads(vacancies: list[Vacancy]) -> list[Vacancy]:
@@ -23,12 +26,19 @@ def drop_without_salary(vacancies: list[Vacancy]) -> list[Vacancy]:
 
 def drop_published_before(vacancies: list[Vacancy], cutoff: datetime) -> list[Vacancy]:
     """Нужен, когда период запроса не совпадает с периодом выдачи hh:
-    просили 2 дня — hh отдал 3, лишний день отсекаем здесь."""
-    return [v for v in vacancies if v.published_at >= cutoff]
+    просили 2 дня — hh отдал 3, лишний день отсекаем здесь.
+    Вакансию без даты (superjob её не отдаёт) оставляем: по периоду уже
+    отфильтровала сама площадка."""
+    return [v for v in vacancies if v.published_at is None or v.published_at >= cutoff]
 
 
 def sort_by_freshness(vacancies: list[Vacancy]) -> list[Vacancy]:
-    return sorted(vacancies, key=lambda v: v.published_at, reverse=True)
+    """Свежие сверху; вакансии без даты — в конце."""
+    return sorted(
+        vacancies,
+        key=lambda v: (v.published_at is not None, v.published_at or _EPOCH),
+        reverse=True,
+    )
 
 
 def _merge_areas(areas: list[str]) -> str:

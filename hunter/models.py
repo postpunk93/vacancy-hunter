@@ -41,7 +41,8 @@ class Vacancy:
     company: str
     url: str
     area: str
-    published_at: datetime
+    # None — даты нет: у superjob её нет в карточке выдачи.
+    published_at: datetime | None
     salary_from: int | None
     salary_to: int | None
     currency: str | None
