@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from .base import Captcha, Card, Detail, Platform, UnknownPlatform
 from .hh import Hh
+from .superjob import Superjob
 
 PLATFORMS: dict[str, Platform] = {
     "hh": Hh("hh"),
     "zarplata": Hh("zarplata"),
+    "superjob": Superjob(),
 }
 
 
