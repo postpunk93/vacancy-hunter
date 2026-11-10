@@ -316,8 +316,8 @@ def _note_in_corpus(
     for (_, vacancies), query in zip(fresh, queries, strict=True):
         for vacancy in vacancies:
             row = vacancy_card_row(vacancy)
-            store.corpus.note_seen(row)
-            store.corpus.add_hit(row["id"], query.role, query.text)
+            _, vacancy_id = store.corpus.note_seen(row)
+            store.corpus.add_hit(vacancy_id, query.role, query.text)
 
 
 def _route(score: Score | None, threshold: int, nearby_threshold: int) -> str:

@@ -30,10 +30,60 @@ def test_new_database_gets_current_schema(tmp_path):
     Corpus.open(tmp_path / "v.db", create=True).close()
 
     conn = sqlite3.connect(tmp_path / "v.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"vacancies", "hits", "verdicts", "seen", "meta", "scores", "applications", "status_history"} <= tables
     assert "texts" not in tables
+
+
+def test_v3_base_migrates_without_losing_rows(tmp_path):
+    path = tmp_path / "db.sqlite"
+    conn = sqlite3.connect(path)
+    for sql in _MIGRATIONS[:3]:
+        conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 3")
+    conn.execute(
+        "INSERT INTO vacancies (id, name, company, url, first_seen_at, last_seen_at) "
+        "VALUES (114811554, 'Редактор', 'АСТ', 'https://hh.ru/vacancy/114811554', "
+        "'2026-11-01', '2026-11-01')"
+    )
+    conn.execute(
+        "INSERT INTO scores (key, criteria_hash, score, why, flags, scored_at) "
+        "VALUES ('hh:114811554', 'h', 7, 'ok', '[]', '2026-11-02')"
+    )
+    conn.commit()
+    conn.close()
+
+    with Corpus.open(path) as corpus:
+        row = corpus.vacancy(114811554)
+        assert (row["source"], row["external_id"]) == ("hh", "114811554")
+        assert corpus.find("hh", "114811554") == 114811554
+        assert corpus.query("SELECT vacancy_id, score FROM latest_scores")[1] == [(114811554, 7)]
+
+
+def _row(source, external_id):
+    row = card_row(search_card(1))
+    row["source"] = source
+    row["external_id"] = external_id
+    return row
+
+
+def test_same_number_from_two_sources_are_two_rows(tmp_path):
+    with Corpus.open(tmp_path / "db.sqlite", create=True) as corpus:
+        hh = _row(source="hh", external_id="1")
+        sj = _row(source="superjob", external_id="1")
+        first = corpus.upsert_card(hh)
+        second = corpus.upsert_card(sj)
+        assert first[0] is True and second[0] is True
+        assert first[1] != second[1]
+        assert corpus.find("hh", "1") == first[1]
+        assert corpus.find("superjob", "1") == second[1]
+        assert corpus.upsert_card(sj) == (False, second[1])
+
+
+def test_resolve_points_to_fetch_for_unknown_pair(corpus):
+    with pytest.raises(CorpusError, match="vacancies fetch"):
+        corpus.resolve("superjob", "1")
 
 
 def test_missing_database_is_not_created_implicitly(tmp_path):
@@ -52,9 +102,9 @@ def test_database_from_newer_code_is_refused(tmp_path):
 
 
 def test_upsert_reports_new_then_existing_and_refreshes_card(corpus, clock):
-    assert corpus.upsert_card(card_row(search_card(1, responsesCount=5))) is True
+    assert corpus.upsert_card(card_row(search_card(1, responsesCount=5)))[0] is True
     clock.now = "2026-10-05T00:00:00+00:00"
-    assert corpus.upsert_card(card_row(search_card(1, responsesCount=40))) is False
+    assert corpus.upsert_card(card_row(search_card(1, responsesCount=40)))[0] is False
 
     row = corpus.vacancy(1)
     assert row["responses_count"] == 40
@@ -206,7 +256,7 @@ def test_note_seen_inserts_only_once_and_keeps_existing_columns(corpus, clock):
     corpus.upsert_card(card_row(search_card(7, responsesCount=36)))
     clock.now = "2026-10-05T00:00:00+00:00"
 
-    assert corpus.note_seen(vacancy_card_row(make_vacancy(vacancy_id="7"))) is False
+    assert corpus.note_seen(vacancy_card_row(make_vacancy(vacancy_id="7")))[0] is False
 
     row = corpus.vacancy(7)
     assert row["responses_count"] == 36
@@ -217,11 +267,16 @@ def test_note_seen_inserts_only_once_and_keeps_existing_columns(corpus, clock):
 
 
 def test_note_seen_inserts_a_new_vacancy(corpus):
-    assert corpus.note_seen(vacancy_card_row(make_vacancy(vacancy_id="8"))) is True
+    assert corpus.note_seen(vacancy_card_row(make_vacancy(vacancy_id="8")))[0] is True
     assert corpus.vacancy(8)["url"] == "https://hh.ru/vacancy/8"
 
 
 def test_latest_scores_view_takes_newest_score_per_vacancy(corpus):
+    corpus.note_seen(card_row(search_card(7)))
+    other = card_row(search_card(9))
+    other["source"] = "zarplata"
+    corpus.note_seen(other)
+
     insert = "INSERT INTO scores VALUES (?, ?, ?, ?, '[]', ?)"
     corpus._conn.execute(insert, ("hh:7", "old", 4, "раньше", "2026-10-01T00:00:00+00:00"))
     corpus._conn.execute(insert, ("hh:7", "new", 8, "позже", "2026-10-02T00:00:00+00:00"))
@@ -292,7 +347,7 @@ def test_v1_database_with_data_is_upgraded_to_v2(tmp_path):
         assert corpus.verdict(7)["verdict"] == "yes"
 
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
     conn.close()
     assert {"seen", "meta", "scores", "applications", "status_history", "latest_scores"} <= names
@@ -331,5 +386,5 @@ def test_v2_applications_survive_the_migration_to_nullable_status(tmp_path):
         assert corpus.application(7)["status"] == "applied"
 
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     conn.close()

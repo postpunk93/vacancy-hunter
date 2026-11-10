@@ -138,6 +138,16 @@ class Detail:
     status: str
     raw: dict
 
+    # Переходное: пара для записи в базу v4. У hh и zarplata id общие,
+    # поэтому площадка всегда hh. Уйдёт вместе с этим модулем в Task 3.
+    @property
+    def source(self) -> str:
+        return "hh"
+
+    @property
+    def external_id(self) -> str:
+        return str(self.vacancy_id)
+
 
 def parse_detail(page_html: str) -> Detail:
     state = _page_state(page_html)

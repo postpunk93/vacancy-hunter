@@ -284,12 +284,13 @@ def cached_database(path, rows):
         for vacancy_id, name, days_ago, description, old_score in rows:
             seen = (now - timedelta(days=days_ago)).isoformat()
             store.corpus._conn.execute(
-                "INSERT INTO vacancies (id, name, company, url, published_at, salary_from, "
-                "currency, gross, experience, work_formats, description, key_skills, "
-                "first_seen_at, last_seen_at) VALUES (?, ?, 'Компания', ?, "
+                "INSERT INTO vacancies (id, source, external_id, name, company, url, published_at, "
+                "salary_from, currency, gross, experience, work_formats, description, key_skills, "
+                "first_seen_at, last_seen_at) VALUES (?, 'hh', ?, ?, 'Компания', ?, "
                 "'2026-10-01T10:00:00.000+03:00', 300000, 'RUR', 0, 'between1And3', "
                 "'[\"REMOTE\"]', ?, '[\"Python\"]', ?, ?)",
-                (vacancy_id, name, f"https://hh.ru/vacancy/{vacancy_id}", description, seen, seen),
+                (vacancy_id, str(vacancy_id), name, f"https://hh.ru/vacancy/{vacancy_id}",
+                 description, seen, seen),
             )
             if old_score is not None:
                 store.save_score(f"hh:{vacancy_id}", "старый-хеш", Score(old_score, "раньше"))

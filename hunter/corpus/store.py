@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from .extract import Detail
+from ..platforms.base import Detail
 
 VERDICTS = ("yes", "no", "maybe")
 
@@ -134,6 +134,22 @@ _MIGRATIONS = (
       SELECT vacancy_id, status, note, test_task, test_due, updated_at FROM applications;
     DROP TABLE applications;
     ALTER TABLE applications_new RENAME TO applications;
+    """,
+    # v4: площадка и внешний id. id остаётся числовым суррогатным ключом,
+    # поэтому hits/verdicts/applications/status_history и их запросы не меняются.
+    # Старые строки — вакансии hh, внешний id совпадает с id.
+    """
+    ALTER TABLE vacancies ADD COLUMN source TEXT NOT NULL DEFAULT 'hh';
+    ALTER TABLE vacancies ADD COLUMN external_id TEXT;
+    UPDATE vacancies SET external_id = CAST(id AS TEXT);
+    CREATE UNIQUE INDEX vacancies_source_external ON vacancies(source, external_id);
+    DROP VIEW latest_scores;
+    CREATE VIEW latest_scores AS
+    SELECT vacancy_id, score, why, flags, scored_at FROM (
+      SELECT v.id AS vacancy_id, s.score, s.why, s.flags, s.scored_at,
+             ROW_NUMBER() OVER (PARTITION BY v.id ORDER BY s.scored_at DESC) AS n
+      FROM scores s JOIN vacancies v ON s.key = v.source || ':' || v.external_id
+    ) WHERE n = 1;
     """,
 )
 SCHEMA_VERSION = len(_MIGRATIONS)
@@ -277,36 +293,76 @@ class Corpus:
             "SELECT 1 FROM vacancies WHERE id = ?", (vacancy_id,)
         ).fetchone() is not None
 
-    def upsert_card(self, row: dict) -> bool:
-        is_new = not self.exists(row["id"])
+    def find(self, source: str, external_id: str) -> int | None:
+        """Суррогатный id вакансии по паре (площадка, внешний id)."""
+        row = self._conn.execute(
+            "SELECT id FROM vacancies WHERE source = ? AND external_id = ?",
+            (source, str(external_id)),
+        ).fetchone()
+        return None if row is None else int(row[0])
+
+    def resolve(self, source: str, external_id: str) -> int:
+        vacancy_id = self.find(source, external_id)
+        if vacancy_id is None:
+            raise CorpusError(
+                f"Вакансии {external_id} с площадки {source} нет в базе. "
+                f"Сначала: vacancies fetch {external_id}"
+            )
+        return vacancy_id
+
+    def _row_key(self, row: dict) -> tuple[str, str]:
+        """Пара (площадка, внешний id) из строки карточки. Пока не все
+        вызывающие перешли на external_id, его подставляет числовой id."""
+        source = row.get("source") or "hh"
+        external_id = row.get("external_id") or row["id"]
+        return str(source), str(external_id)
+
+    def _free_id(self, external_id: str) -> int | None:
+        """Суррогатный id новой строки: числовой внешний id, если он свободен.
+
+        Так у вакансий hh id строки совпадает с id вакансии — на этом держатся
+        старые базы, ссылки в таблице и запросы владельца. Совпал с чужой
+        строкой (другая площадка с тем же числом) — SQLite выдаст следующий.
+        """
+        if not external_id.isdigit():
+            return None
+        candidate = int(external_id)
+        taken = self._conn.execute(
+            "SELECT 1 FROM vacancies WHERE id = ?", (candidate,)
+        ).fetchone()
+        return None if taken else candidate
+
+    def _write(self, row: dict, *, touch_all: bool) -> tuple[bool, int]:
+        source, external_id = self._row_key(row)
+        is_new = self.find(source, external_id) is None
         now = self._clock()
-        columns = ("id", *_CARD_COLUMNS, "first_seen_at", "last_seen_at")
-        values = (row["id"], *(row[c] for c in _CARD_COLUMNS), now, now)
-        updates = ", ".join(f"{c} = excluded.{c}" for c in (*_CARD_COLUMNS, "last_seen_at"))
-        self._conn.execute(
+        columns = ["source", "external_id", *_CARD_COLUMNS, "first_seen_at", "last_seen_at"]
+        values = [source, external_id, *(row[c] for c in _CARD_COLUMNS), now, now]
+        vacancy_id = self._free_id(external_id)
+        if vacancy_id is not None:
+            columns.insert(0, "id")
+            values.insert(0, vacancy_id)
+        if touch_all:
+            updates = ", ".join(f"{c} = excluded.{c}" for c in (*_CARD_COLUMNS, "last_seen_at"))
+        else:
+            updates = "last_seen_at = excluded.last_seen_at"
+        vacancy_id = self._conn.execute(
             f"INSERT INTO vacancies ({', '.join(columns)}) "
             f"VALUES ({', '.join('?' * len(columns))}) "
-            f"ON CONFLICT(id) DO UPDATE SET {updates}",
+            f"ON CONFLICT(source, external_id) DO UPDATE SET {updates} "
+            f"RETURNING id",
             values,
-        )
+        ).fetchone()[0]
         self._conn.commit()
-        return is_new
+        return is_new, int(vacancy_id)
 
-    def note_seen(self, row: dict) -> bool:
+    def upsert_card(self, row: dict) -> tuple[bool, int]:
+        return self._write(row, touch_all=True)
+
+    def note_seen(self, row: dict) -> tuple[bool, int]:
         """Проход увидел вакансию: новую заводит, у известной трогает только
         last_seen_at — карточка из сбора богаче строки прохода и остаётся нетронутой."""
-        is_new = not self.exists(row["id"])
-        now = self._clock()
-        columns = ("id", *_CARD_COLUMNS, "first_seen_at", "last_seen_at")
-        values = (row["id"], *(row[c] for c in _CARD_COLUMNS), now, now)
-        self._conn.execute(
-            f"INSERT INTO vacancies ({', '.join(columns)}) "
-            f"VALUES ({', '.join('?' * len(columns))}) "
-            f"ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at",
-            values,
-        )
-        self._conn.commit()
-        return is_new
+        return self._write(row, touch_all=False)
 
     def add_hit(self, vacancy_id: int, role: str, query: str) -> None:
         self._conn.execute(
@@ -327,8 +383,9 @@ class Corpus:
     def save_detail(self, detail: Detail) -> None:
         # Поля карточки у существующей строки не трогаем: выдача — основной
         # источник метаданных, страница лишь дополняет текстом.
-        if not self.exists(detail.vacancy_id):
-            self.upsert_card(detail.row)
+        vacancy_id = self.find(detail.source, detail.external_id)
+        if vacancy_id is None:
+            vacancy_id = self.upsert_card(detail.row)[1]
         self._conn.execute(
             "UPDATE vacancies SET description = ?, key_skills = ?, status = ?, "
             "detail_json = ?, detail_fetched_at = ? WHERE id = ?",
@@ -338,7 +395,7 @@ class Corpus:
                 detail.status,
                 json.dumps(detail.raw, ensure_ascii=False),
                 self._clock(),
-                detail.vacancy_id,
+                vacancy_id,
             ),
         )
         self._conn.commit()

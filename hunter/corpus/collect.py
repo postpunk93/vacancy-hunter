@@ -89,11 +89,11 @@ def collect(corpus: Corpus, fetch_page: FetchPage, query: SearchQuery, role: str
             break
 
         for row in rows:
-            is_new = corpus.upsert_card(row)
-            corpus.add_hit(row["id"], role, query.text)
+            is_new, vacancy_id = corpus.upsert_card(row)
+            corpus.add_hit(vacancy_id, role, query.text)
             # Рекламная карточка повторяет обычную — в отчёте одна вакансия.
-            if row["id"] not in counted:
-                counted.add(row["id"])
+            if vacancy_id not in counted:
+                counted.add(vacancy_id)
                 report.cards += 1
                 report.new += is_new
         report.pages += 1
