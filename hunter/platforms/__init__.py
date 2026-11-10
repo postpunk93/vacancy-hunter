@@ -1,15 +1,17 @@
-"""Площадки поиска работы: hh (он же zarplata) и superjob."""
+"""Площадки поиска работы: hh (он же zarplata), superjob и rabota."""
 
 from __future__ import annotations
 
 from .base import Captcha, Card, Detail, Platform, UnknownPlatform
 from .hh import Hh
+from .rabota import Rabota
 from .superjob import Superjob
 
 PLATFORMS: dict[str, Platform] = {
     "hh": Hh("hh"),
     "zarplata": Hh("zarplata"),
     "superjob": Superjob(),
+    "rabota": Rabota(),
 }
 
 
