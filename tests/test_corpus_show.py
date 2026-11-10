@@ -26,7 +26,8 @@ def test_full_vacancy(corpus):
     assert text.startswith("## Python backend — Компания")
     assert "https://hh.ru/vacancy/1" in text
     assert "от 300 000 RUR, на руки, выплаты MONTHLY" in text
-    assert "формат: REMOTE" in text
+    # Формат со страницы вакансии главнее карточки: страница его знает точнее.
+    assert "формат: ON_SITE" in text
     assert "Откликов: 5" in text
     assert "Роли: backend (python AND backend)" in text
     assert "Вердикт: нет" in text

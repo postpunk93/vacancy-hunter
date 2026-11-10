@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from hunter.platforms.base import vacancy_card_row
 from hunter.platforms.hh import card_row, parse_detail
 from hunter.corpus.store import _MIGRATIONS, SCHEMA_VERSION, STATUS_LABELS, STATUSES, Corpus, CorpusError
-from tests.factories import make_vacancy, search_card, vacancy_page
+from tests.factories import make_detail, make_vacancy, search_card, vacancy_page
 
 
 class FakeClock:
@@ -415,3 +416,22 @@ def test_zarplata_score_keys_survive_the_migration(tmp_path):
     with Corpus.open(path) as corpus:
         assert corpus.query("SELECT vacancy_id, score FROM latest_scores")[1] == [(9, 6)]
         assert corpus.query("SELECT key FROM seen")[1] == [("hh:9",)]
+
+
+def test_update_detail_writes_work_formats_from_the_vacancy_page(corpus):
+    row = vacancy_card_row(make_vacancy())
+    row["work_formats"] = json.dumps([])
+    vacancy_id = corpus.upsert_card(row)[1]
+
+    corpus.update_detail(vacancy_id, make_detail())
+
+    assert json.loads(corpus.vacancy(vacancy_id)["work_formats"]) == ["REMOTE"]
+
+
+def test_update_detail_does_not_erase_known_formats_with_an_empty_list(corpus):
+    vacancy_id = corpus.upsert_card(vacancy_card_row(make_vacancy()))[1]
+    blank = {**vacancy_card_row(make_vacancy()), "work_formats": json.dumps([])}
+
+    corpus.update_detail(vacancy_id, make_detail(row=blank))
+
+    assert json.loads(corpus.vacancy(vacancy_id)["work_formats"]) == ["REMOTE"]

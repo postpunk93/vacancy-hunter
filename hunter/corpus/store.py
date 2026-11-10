@@ -405,18 +405,28 @@ class Corpus:
         self.update_detail(vacancy_id, detail)
 
     def update_detail(self, vacancy_id: int, detail: Detail) -> None:
-        """Текст и метаданные страницы — в уже известную строку."""
+        """Текст и метаданные страницы — в уже известную строку.
+
+        Формат работы пишем, только если страница его сообщила: пустой список
+        значит «не знаю», а не «формата нет», иначе карточка с форматом была бы
+        затёрта страницей, которая его не отдала."""
+        fields = (
+            "description = ?, key_skills = ?, status = ?, "
+            "detail_json = ?, detail_fetched_at = ?"
+        )
+        values: tuple[object, ...] = (
+            detail.description,
+            json.dumps(detail.key_skills, ensure_ascii=False),
+            detail.status,
+            json.dumps(detail.raw, ensure_ascii=False),
+            self._clock(),
+        )
+        formats = json.loads(detail.row.get("work_formats") or "[]")
+        if formats:
+            fields += ", work_formats = ?"
+            values += (json.dumps(formats, ensure_ascii=False),)
         self._conn.execute(
-            "UPDATE vacancies SET description = ?, key_skills = ?, status = ?, "
-            "detail_json = ?, detail_fetched_at = ? WHERE id = ?",
-            (
-                detail.description,
-                json.dumps(detail.key_skills, ensure_ascii=False),
-                detail.status,
-                json.dumps(detail.raw, ensure_ascii=False),
-                self._clock(),
-                vacancy_id,
-            ),
+            f"UPDATE vacancies SET {fields} WHERE id = ?", (*values, vacancy_id)
         )
         self._conn.commit()
 
