@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from sqlite3 import Row
 
+from ..platforms import format_ref
 from ..text import plural
 
 
@@ -39,17 +40,22 @@ def _signals(v: Row) -> list[str]:
     return signals
 
 
+def _ref(v: Row) -> str:
+    """Как владелец зовёт вакансию в командах: у hh — голый id."""
+    return format_ref(v["source"], v["external_id"])
+
+
 def _body(v: Row) -> str:
     if v["description"]:
         return v["description"]
     if v["status"] == "deleted":
         return "_Вакансия удалена с hh, текста нет._"
-    return f"_Полного текста нет — `vacancies fetch {v['id']}`._"
+    return f"_Полного текста нет — `vacancies fetch {_ref(v)}`._"
 
 
 def render_vacancy(vacancy: Row, hits: list[Row], verdict: Row | None) -> str:
     v = vacancy
-    meta = [f"id {v['id']}"]
+    meta = [f"id {_ref(v)}"]
     if v["area"]:
         meta.append(v["area"])
     if v["published_at"]:

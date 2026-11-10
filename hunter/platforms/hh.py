@@ -35,6 +35,8 @@ VACANCY_URL = "https://hh.ru/vacancy/{id}"
 _STATE_MARKER = 'id="HH-Lux-InitialState"'
 _ANTIFRAUD = "HH_ANTIFRAUD_SUSPICIOUS_VACANCY"
 _VACANCY_PATH = re.compile(r"^/vacancy/(\d+)/?$")
+# Домены движка hh: ссылка с любого из них ведёт на ту же вакансию.
+_HOSTS = ("hh.ru", "zarplata.ru")
 
 # Слова, по которым страница без состояния опознаётся как капча, а не редизайн.
 _CAPTCHA_MARKERS = ("captcha", "капча", "робот", "подтвердите", "access denied", "blocked")
@@ -282,7 +284,7 @@ class Hh:
         # zarplata — тот же пул id, ссылка на неё ведёт на ту же вакансию hh.
         if parsed.scheme not in ("http", "https"):
             return None
-        if not any(host == site or host.endswith("." + site) for site in SITES):
+        if not any(host == site or host.endswith("." + site) for site in _HOSTS):
             return None
         match = _VACANCY_PATH.match(parsed.path)
         return match.group(1) if match else None

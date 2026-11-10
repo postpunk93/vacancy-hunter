@@ -11,7 +11,6 @@ import time
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 from .. import paths
 from ..config import ConfigError, load_config
@@ -19,6 +18,7 @@ from ..evaluate import evaluate, load_verdicts, rescore
 from ..export import export_rows, write_xlsx
 from ..fetch import get_html, new_client
 from ..models import SearchQuery
+from ..platforms import PLATFORMS, format_ref, parse_ref
 from ..scoring import ask_model, load_criteria
 from ..store import Store
 from . import ui
@@ -34,28 +34,27 @@ EXPERIENCE = ("noExperience", "between1And3", "between3And6", "moreThan6")
 WORK_FORMATS = ("remote", "hybrid", "on_site", "field_work")
 MAX_PAGES = 40  # hh не отдаёт дальше 2000 вакансий: 40 страниц по 50
 
-_SITES = ("hh.ru", "zarplata.ru")
-_VACANCY_PATH = re.compile(r"^/vacancy/(\d+)/?$")
-
 FIRST_RUN = "Первый запуск: me/profile.md нет. Начни настройку (skill setup)."
 
-def parse_vacancy_ref(value: str) -> int:
-    """id или ссылка на вакансию hh/zarplata любого поддомена."""
-    value = value.strip()
-    if value.isdigit():
-        return int(value)
-    parsed = urlparse(value)
-    host = (parsed.hostname or "").lower()
-    on_site = any(host == site or host.endswith("." + site) for site in _SITES)
-    match = _VACANCY_PATH.match(parsed.path)
-    if parsed.scheme in ("http", "https") and on_site and match:
-        return int(match.group(1))
-    raise ValueError(f"Не похоже на вакансию hh или zarplata: {value!r}")
-
-
-def _parse_refs(refs: list[str]) -> list[int]:
+def _parse_refs(refs: list[str]) -> list[tuple[str, str]]:
     # Порядок сохраняем, повторы убираем: модель может передать один id дважды.
-    return list(dict.fromkeys(parse_vacancy_ref(ref) for ref in refs))
+    return list(dict.fromkeys(parse_ref(ref) for ref in refs))
+
+
+def _resolve(corpus: Corpus, ref: str) -> tuple[int, str]:
+    """Ссылка → (суррогатный id, как показать владельцу).
+
+    У hh и zarplata одно пространство id: если вакансия попала в базу
+    с zarplata, ссылка на hh всё равно её найдёт."""
+    source, external_id = parse_ref(ref)
+    vacancy_id = corpus.find(source, external_id)
+    if vacancy_id is None and source == "hh":
+        vacancy_id = corpus.find("zarplata", external_id)
+    if vacancy_id is None:
+        raise CorpusError(
+            f"Вакансии {external_id} нет в базе. Сначала: vacancies fetch {ref}"
+        )
+    return vacancy_id, ref
 
 
 def _make_wait(delay: float, sleep):
@@ -125,22 +124,17 @@ def _cmd_fetch(args, fetch_page, sleep) -> int:
 
 def _cmd_mark(args, fetch_page, sleep) -> int:
     try:
-        vacancy_id = parse_vacancy_ref(args.ref)
-    except ValueError as exc:
+        with Corpus.open(args.db) as corpus:
+            vacancy_id, _ = _resolve(corpus, args.ref)
+            corpus.set_verdict(vacancy_id, args.verdict, args.note)
+    except (ValueError, CorpusError) as exc:
         print(exc, file=sys.stderr)
         return EXIT_USAGE
-    with Corpus.open(args.db) as corpus:
-        corpus.set_verdict(vacancy_id, args.verdict, args.note)
-    print(f"{vacancy_id}: {args.verdict}" + (f" — {args.note}" if args.note else ""))
+    print(f"{args.ref}: {args.verdict}" + (f" — {args.note}" if args.note else ""))
     return 0
 
 
 def _cmd_status(args, fetch_page, sleep) -> int:
-    try:
-        vacancy_id = parse_vacancy_ref(args.ref)
-    except ValueError as exc:
-        print(exc, file=sys.stderr)
-        return EXIT_USAGE
     due = None
     if args.due is not None:
         try:
@@ -148,9 +142,16 @@ def _cmd_status(args, fetch_page, sleep) -> int:
         except ValueError:
             print("--due: дата в виде ГГГГ-ММ-ДД, например 2026-10-20", file=sys.stderr)
             return EXIT_USAGE
-    with Corpus.open(args.db) as corpus:
-        corpus.set_status(vacancy_id, args.status, args.note, test_task=args.test, test_due=due)
-    print(f"{vacancy_id}: {STATUS_LABELS[args.status]}" + (f" — {args.note}" if args.note else ""))
+    try:
+        with Corpus.open(args.db) as corpus:
+            vacancy_id, _ = _resolve(corpus, args.ref)
+            corpus.set_status(
+                vacancy_id, args.status, args.note, test_task=args.test, test_due=due
+            )
+    except (ValueError, CorpusError) as exc:
+        print(exc, file=sys.stderr)
+        return EXIT_USAGE
+    print(f"{args.ref}: {STATUS_LABELS[args.status]}" + (f" — {args.note}" if args.note else ""))
     return 0
 
 
@@ -182,22 +183,26 @@ def _cmd_todo(args, fetch_page, sleep) -> int:
 
 def _cmd_show(args, fetch_page, sleep) -> int:
     try:
-        ids = _parse_refs(args.refs)
+        refs = _parse_refs(args.refs)
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return EXIT_USAGE
     blocks, missing = [], []
     with Corpus.open(args.db) as corpus:
-        for vacancy_id in ids:
-            vacancy = corpus.vacancy(vacancy_id)
-            if vacancy is None:
-                missing.append(vacancy_id)
+        for source, external_id in refs:
+            ref = format_ref(source, external_id)
+            vacancy_id = corpus.find(source, external_id)
+            if vacancy_id is None and source == "hh":
+                vacancy_id = corpus.find("zarplata", external_id)
+            if vacancy_id is None:
+                missing.append(ref)
                 continue
+            vacancy = corpus.vacancy(vacancy_id)
             blocks.append(render_vacancy(vacancy, corpus.hits(vacancy_id), corpus.verdict(vacancy_id)))
     if blocks:
         print("\n\n---\n\n".join(blocks))
-    for vacancy_id in missing:
-        print(f"Вакансии {vacancy_id} нет в базе — vacancies fetch {vacancy_id}", file=sys.stderr)
+    for ref in missing:
+        print(f"Вакансии {ref} нет в базе — vacancies fetch {ref}", file=sys.stderr)
     return 1 if missing else 0
 
 

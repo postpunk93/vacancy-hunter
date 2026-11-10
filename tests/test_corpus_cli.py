@@ -5,7 +5,8 @@ import sqlite3
 import pytest
 
 from hunter import paths
-from hunter.corpus.cli import main, parse_vacancy_ref
+from hunter.corpus.cli import main
+from hunter.platforms import parse_ref
 from hunter.fetch import Blocked
 from tests.factories import vacancy_page
 
@@ -20,7 +21,7 @@ from tests.factories import vacancy_page
     "https://tomsk.zarplata.ru/vacancy/123",
 ])
 def test_vacancy_refs(ref):
-    assert parse_vacancy_ref(ref) == 123
+    assert parse_ref(ref) == ("hh", "123")
 
 
 @pytest.mark.parametrize("ref", [
@@ -29,7 +30,7 @@ def test_vacancy_refs(ref):
 ])
 def test_rejected_refs(ref):
     with pytest.raises(ValueError):
-        parse_vacancy_ref(ref)
+        parse_ref(ref)
 
 
 class Site:

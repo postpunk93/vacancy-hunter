@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+from ..platforms import format_ref
 from ..text import plural
 from .store import STATUS_LABELS, STATUSES, Corpus
 
@@ -20,15 +21,16 @@ FUNNEL_COLUMNS = ["id", "название", "компания", "статус", 
 def funnel_rows(corpus: Corpus) -> list[tuple]:
     """Вакансии с откликом, кроме закрытых, по порядку этапов воронки."""
     _, rows = corpus.query(
-        "SELECT v.id, v.name, v.company, a.status, a.test_due, a.note "
+        "SELECT v.id, v.source, v.external_id, v.name, v.company, a.status, a.test_due, a.note "
         "FROM applications a JOIN vacancies v ON v.id = a.vacancy_id "
         "WHERE a.status IS NOT NULL"
     )
-    shown = [row for row in rows if row[3] not in HIDDEN]
-    shown.sort(key=lambda row: (STATUSES.index(row[3]), row[0]))
+    shown = [row for row in rows if row[5] not in HIDDEN]
+    shown.sort(key=lambda row: (STATUSES.index(row[5]), row[0]))
     return [
-        (id_, name, company, STATUS_LABELS[status], due or "", note or "")
-        for id_, name, company, status, due, note in shown
+        (format_ref(source, external_id), name, company, STATUS_LABELS[status],
+         due or "", note or "")
+        for _, source, external_id, name, company, status, due, note in shown
     ]
 
 
@@ -41,15 +43,15 @@ def reminders(corpus: Corpus, today: date) -> list[str]:
     черновики и отклики без ответа. Пустой список — напоминать не о чем.
     Отсчёт — от последней записи status_history (дата в UTC)."""
     _, rows = corpus.query(
-        "SELECT v.id, v.name, v.company, a.status, a.test_due, "
+        "SELECT v.id, v.source, v.external_id, v.name, v.company, a.status, a.test_due, "
         "       (SELECT h.at FROM status_history h WHERE h.vacancy_id = a.vacancy_id "
         "        ORDER BY h.id DESC LIMIT 1) "
         "FROM applications a JOIN vacancies v ON v.id = a.vacancy_id "
         "WHERE a.status IN ('test', 'drafted', 'applied')"
     )
     tests, drafts, applied = [], [], []
-    for id_, name, company, status, due, changed_at in rows:
-        tail = f"{name} — {company} (id {id_})"
+    for _, source, external_id, name, company, status, due, changed_at in rows:
+        tail = f"{name} — {company} (id {format_ref(source, external_id)})"
         if status == "test":
             deadline = _parse_date(due)
             if deadline is None or deadline > today + timedelta(days=TEST_SOON_DAYS):

@@ -24,7 +24,7 @@ _COLUMNS = "ABCDEFGHIJ"
 _STATUS_COLUMN = "H"
 
 _SELECT = """
-SELECT v.id, v.url, v.name, v.company, v.first_seen_at,
+SELECT v.id, v.source, v.external_id, v.url, v.name, v.company, v.first_seen_at,
        s.score, s.why, s.flags,
        a.status, a.note,
        (SELECT role FROM hits WHERE vacancy_id = v.id

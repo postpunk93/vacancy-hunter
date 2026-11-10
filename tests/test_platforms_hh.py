@@ -263,3 +263,39 @@ def test_vacancy_card_row_keeps_unknown_gross_unknown():
 
 def test_vacancy_card_row_allows_unknown_date():
     assert vacancy_card_row(make_vacancy(published_at=None))["published_at"] is None
+
+
+# --- ссылка на вакансию -------------------------------------------------
+
+
+def test_parse_ref_forms():
+    from hunter.platforms import parse_ref
+
+    assert parse_ref("114811554") == ("hh", "114811554")
+    assert parse_ref("zarplata:114811554") == ("zarplata", "114811554")
+    assert parse_ref("https://hh.ru/vacancy/114811554?from=serp") == ("hh", "114811554")
+    assert parse_ref("https://m.hh.ru/vacancy/114811554") == ("hh", "114811554")
+    assert parse_ref("https://www.zarplata.ru/vacancy/114811554") == ("hh", "114811554")
+
+
+def test_parse_ref_rejects_foreign_links():
+    from hunter.platforms import parse_ref
+
+    for value in ("abc", "", "https://evil.com/vacancy/1", "https://hh.ru/employer/1",
+                  "https://hh.ru/vacancy/abc", "ftp://hh.ru/vacancy/1", "avito:123"):
+        with pytest.raises(ValueError):
+            parse_ref(value)
+
+
+def test_format_ref_is_bare_for_hh():
+    from hunter.platforms import format_ref
+
+    assert format_ref("hh", "114811554") == "114811554"
+    assert format_ref("zarplata", "114811554") == "zarplata:114811554"
+
+
+def test_ref_round_trip():
+    from hunter.platforms import format_ref, parse_ref
+
+    for source, external_id in (("hh", "1"), ("zarplata", "3")):
+        assert parse_ref(format_ref(source, external_id)) == (source, external_id)

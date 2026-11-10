@@ -22,6 +22,11 @@ def vacancy_url(vacancy_id):
     return f"https://hh.ru/vacancy/{vacancy_id}"
 
 
+def refs(ids):
+    """Голые id — это вакансии hh; докачка теперь принимает пары."""
+    return [("hh", str(i)) for i in ids]
+
+
 def full_page(start, count=50):
     return search_page([search_card(i) for i in range(start, start + count)])
 
@@ -141,32 +146,32 @@ def test_fetch_details_saves_text_and_pauses_between_requests(corpus):
     site = Site({vacancy_url(1): vacancy_page(1), vacancy_url(2): vacancy_page(2)})
     waits = Waits()
 
-    report = fetch_details(corpus, site, [1, 2], wait=waits)
+    report = fetch_details(corpus, site, refs([1, 2]), wait=waits)
 
-    assert report.fetched == [1, 2]
+    assert report.fetched == ["1", "2"]
     assert report.exit_code == EXIT_OK
     assert waits.count == 1
     assert corpus.vacancy(2)["description"] == "Пишем на **Python**"
 
 
 def test_fetch_details_skips_known_text_unless_refresh(corpus):
-    fetch_details(corpus, Site({vacancy_url(1): vacancy_page(1)}), [1])
+    fetch_details(corpus, Site({vacancy_url(1): vacancy_page(1)}), refs([1]))
 
     site = Site({vacancy_url(1): vacancy_page(1, description="<p>Новое</p>")})
-    assert fetch_details(corpus, site, [1]).skipped == [1]
+    assert fetch_details(corpus, site, refs([1])).skipped == ["1"]
     assert site.calls == []
 
-    assert fetch_details(corpus, site, [1], refresh=True).fetched == [1]
+    assert fetch_details(corpus, site, refs([1]), refresh=True).fetched == ["1"]
     assert corpus.vacancy(1)["description"] == "Новое"
 
 
 def test_fetch_details_marks_deleted_vacancies(corpus):
-    fetch_details(corpus, Site({vacancy_url(1): vacancy_page(1)}), [1])
+    fetch_details(corpus, Site({vacancy_url(1): vacancy_page(1)}), refs([1]))
     site = Site({vacancy_url(1): NotFound("404"), vacancy_url(9): NotFound("404")})
 
-    report = fetch_details(corpus, site, [1, 9], refresh=True)
+    report = fetch_details(corpus, site, refs([1, 9]), refresh=True)
 
-    assert report.deleted == [1, 9]
+    assert report.deleted == ["1", "9"]
     assert report.exit_code == EXIT_OK
     assert corpus.vacancy(1)["status"] == "deleted"
     assert not corpus.exists(9), "строку для неизвестной удалённой вакансии не заводим"
@@ -175,10 +180,10 @@ def test_fetch_details_marks_deleted_vacancies(corpus):
 def test_one_failure_does_not_stop_the_rest(corpus):
     site = Site({vacancy_url(1): FetchError("timeout"), vacancy_url(2): vacancy_page(2)})
 
-    report = fetch_details(corpus, site, [1, 2])
+    report = fetch_details(corpus, site, refs([1, 2]))
 
-    assert report.fetched == [2]
-    assert report.failed == [(1, "timeout")]
+    assert report.fetched == ["2"]
+    assert report.failed == [("1", "timeout")]
     assert report.exit_code == EXIT_PARTIAL
 
 
@@ -188,10 +193,10 @@ def test_malformed_page_is_a_failure_not_a_crash(corpus):
         vacancy_url(2): vacancy_page(2),
     })
 
-    report = fetch_details(corpus, site, [1, 2])
+    report = fetch_details(corpus, site, refs([1, 2]))
 
-    assert report.fetched == [2]
-    assert [vacancy_id for vacancy_id, _ in report.failed] == [1]
+    assert report.fetched == ["2"]
+    assert [ref for ref, _ in report.failed] == ["1"]
     assert "сменил формат" in report.failed[0][1]
     assert report.exit_code == EXIT_PARTIAL
 
@@ -200,18 +205,29 @@ def test_malformed_page_is_a_failure_not_a_crash(corpus):
 def test_block_stops_fetching_and_lists_the_rest(corpus, answer):
     site = Site({vacancy_url(1): vacancy_page(1), vacancy_url(2): answer})
 
-    report = fetch_details(corpus, site, [1, 2, 3])
+    report = fetch_details(corpus, site, refs([1, 2, 3]))
 
-    assert report.fetched == [1]
-    assert report.not_reached == [2, 3]
+    assert report.fetched == ["1"]
+    assert report.not_reached == ["2", "3"]
     assert report.exit_code == EXIT_BLOCKED
     assert vacancy_url(3) not in site.calls
 
 
 def test_role_tags_fetched_and_already_known_vacancies(corpus):
-    fetch_details(corpus, Site({vacancy_url(1): vacancy_page(1)}), [1])
+    fetch_details(corpus, Site({vacancy_url(1): vacancy_page(1)}), refs([1]))
 
-    fetch_details(corpus, Site({vacancy_url(2): vacancy_page(2)}), [1, 2], role="backend")
+    fetch_details(corpus, Site({vacancy_url(2): vacancy_page(2)}), refs([1, 2]), role="backend")
 
     assert [(h["role"], h["query"]) for h in corpus.hits(1)] == [("backend", "manual")]
     assert [(h["role"], h["query"]) for h in corpus.hits(2)] == [("backend", "manual")]
+
+
+def test_fetch_adds_vacancy_missing_from_base(corpus):
+    """Вакансию по ссылке заводят в базе, даже если в выдаче её не было."""
+    site = Site({vacancy_url(7): vacancy_page(7)})
+
+    report = fetch_details(corpus, site, refs([7]))
+
+    assert report.fetched == ["7"]
+    assert corpus.find("hh", "7") is not None
+    assert corpus.vacancy(7)["description"]

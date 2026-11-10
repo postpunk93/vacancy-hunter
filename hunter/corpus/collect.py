@@ -6,7 +6,7 @@ from typing import Callable
 from ..fetch import Blocked, FetchError, NotFound
 from ..models import SearchQuery
 from ..parse import ParseError
-from ..platforms import Captcha, get
+from ..platforms import Captcha, format_ref, get
 from ..text import plural
 from .store import Corpus
 
@@ -103,11 +103,14 @@ def collect(corpus: Corpus, fetch_page: FetchPage, query: SearchQuery, role: str
 
 @dataclass
 class FetchReport:
-    fetched: list[int] = field(default_factory=list)
-    skipped: list[int] = field(default_factory=list)
-    deleted: list[int] = field(default_factory=list)
-    failed: list[tuple[int, str]] = field(default_factory=list)
-    not_reached: list[int] = field(default_factory=list)
+    """Отчёт докачки. Ссылки в списках — в форме `parse_ref`/`format_ref`:
+    у hh это голый id, у остальных площадок `площадка:id`."""
+
+    fetched: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+    not_reached: list[str] = field(default_factory=list)
     blocked: str | None = None
 
     @property
@@ -119,48 +122,54 @@ class FetchReport:
     def summary(self) -> str:
         lines = [
             f"скачано {len(self.fetched)}, уже были {len(self.skipped)}, "
-            f"удалены на hh {len(self.deleted)}, ошибок {len(self.failed)}"
+            f"удалены {len(self.deleted)}, ошибок {len(self.failed)}"
         ]
-        lines += [f"  {vacancy_id}: {error}" for vacancy_id, error in self.failed]
+        lines += [f"  {ref}: {error}" for ref, error in self.failed]
         if self.blocked:
             lines.append(f"ОСТАНОВЛЕНО — блокировка: {self.blocked}")
-            lines.append("не обработаны: " + " ".join(map(str, self.not_reached)))
+            lines.append("не обработаны: " + " ".join(self.not_reached))
         return "\n".join(lines)
 
 
-def fetch_details(corpus: Corpus, fetch_page: FetchPage, ids: list[int], *,
+def fetch_details(corpus: Corpus, fetch_page: FetchPage, refs: list[tuple[str, str]], *,
                   role: str | None = None, refresh: bool = False,
-                  wait: Callable[[], None] = _no_wait, source: str = "hh") -> FetchReport:
+                  wait: Callable[[], None] = _no_wait) -> FetchReport:
+    """Скачивает страницы вакансий по парам (площадка, внешний id).
+    Вакансию, которой нет в базе, добавляет: это единственный путь
+    завести её по ссылке."""
     report = FetchReport()
     requested = False
-    for index, vacancy_id in enumerate(ids):
-        if not refresh and corpus.has_detail(vacancy_id):
-            report.skipped.append(vacancy_id)
-            if role and corpus.exists(vacancy_id):
+    for index, (source, external_id) in enumerate(refs):
+        ref = format_ref(source, external_id)
+        vacancy_id = corpus.find(source, external_id)
+        if not refresh and vacancy_id is not None and corpus.has_detail(vacancy_id):
+            report.skipped.append(ref)
+            if role:
                 corpus.add_hit(vacancy_id, role, MANUAL_QUERY)
             continue
 
         if requested:
             wait()
         requested = True
+        platform = get(source)
         try:
-            platform = get(source)
-            detail = platform.parse_detail(fetch_page(platform.vacancy_url(str(vacancy_id))))
+            detail = platform.parse_detail(fetch_page(platform.vacancy_url(external_id)))
         except (Blocked, Captcha) as exc:
             report.blocked = str(exc)
-            report.not_reached = list(ids[index:])
+            report.not_reached = [format_ref(s, e) for s, e in refs[index:]]
             break
         except NotFound:
-            corpus.mark_deleted(vacancy_id)
-            report.deleted.append(vacancy_id)
+            if vacancy_id is not None:
+                corpus.mark_deleted(vacancy_id)
+            report.deleted.append(ref)
             continue
         except (FetchError, ParseError) as exc:
-            report.failed.append((vacancy_id, str(exc)))
+            report.failed.append((ref, str(exc)))
             continue
         except _CARD_ERRORS as exc:
             # Одна странная страница не должна ронять докачку остальных.
             report.failed.append((
-                vacancy_id,
+                ref,
                 f"страница не разобралась ({exc.__class__.__name__}: {exc}) — сайт сменил формат",
             ))
             continue
@@ -168,5 +177,5 @@ def fetch_details(corpus: Corpus, fetch_page: FetchPage, ids: list[int], *,
         corpus.save_detail(detail)
         if role:
             corpus.add_hit(corpus.find(detail.source, detail.external_id), role, MANUAL_QUERY)
-        report.fetched.append(vacancy_id)
+        report.fetched.append(ref)
     return report
