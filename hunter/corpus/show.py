@@ -49,7 +49,7 @@ def _body(v: Row) -> str:
     if v["description"]:
         return v["description"]
     if v["status"] == "deleted":
-        return "_Вакансия удалена с hh, текста нет._"
+        return "_Вакансия удалена с площадки, текста нет._"
     return f"_Полного текста нет — `vacancies fetch {_ref(v)}`._"
 
 
@@ -82,7 +82,7 @@ def render_vacancy(vacancy: Row, hits: list[Row], verdict: Row | None) -> str:
     else:
         lines.append("- Вердикт: нет")
     if v["status"]:
-        lines.append(f"- Статус на hh: {v['status']}")
+        lines.append(f"- Статус на площадке: {v['status']}")
     skills = json.loads(v["key_skills"] or "[]")
     if skills:
         lines.append("- Навыки: " + ", ".join(skills))
