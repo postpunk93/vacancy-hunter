@@ -53,11 +53,21 @@ def test_salary_bounds_currency_and_mode_are_captured():
     assert any(v.gross is False for v in vacancies)
 
 
+def test_zarplata_search_page_parses_every_card():
+    """Страница выдачи zarplata разбирается целиком. Исходный баг был в адресе
+    выдачи, его ловит тест URL, а не этот."""
+    vacancies = parse_search_page(fixture("zarplata_search_python.html"), "zarplata")
+
+    assert len(vacancies) == 50
+    assert {v.source for v in vacancies} == {"zarplata"}
+    assert all(v.vacancy_id.isdigit() for v in vacancies)
+    assert sum(not v.has_salary for v in vacancies) == 36
+
+
 def test_missing_compensation_becomes_empty_bounds():
     vacancies = parse_search_page(fixture("zarplata_search_python.html"), "zarplata")
 
-    assert len(vacancies) == 1
-    v = vacancies[0]
+    v = next(v for v in vacancies if v.vacancy_id == "139289794")
     assert v.source == "zarplata"
     assert v.salary_from is None
     assert v.salary_to is None

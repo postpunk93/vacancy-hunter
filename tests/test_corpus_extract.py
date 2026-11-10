@@ -34,7 +34,7 @@ def test_card_row_extracts_quality_signals_from_a_real_card():
 
 
 def test_card_without_salary_or_antifraud():
-    raw = real_cards("zarplata_search_python.html")[0]
+    raw = next(c for c in real_cards("zarplata_search_python.html") if c["vacancyId"] == 139289794)
 
     row = card_row(raw)
 

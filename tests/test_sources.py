@@ -19,12 +19,12 @@ def test_hh_url_uses_the_search_path_and_sorts_by_freshness():
     assert params(url)["order_by"] == "publication_time"
 
 
-def test_zarplata_url_uses_its_own_path_but_the_same_parameters():
+def test_zarplata_url_uses_its_own_domain_and_the_hh_search_path():
     url = build_url("zarplata", SearchQuery(name="q", text="python"))
 
     parts = urlsplit(url)
     assert parts.netloc == "www.zarplata.ru"
-    assert parts.path == "/vacancies"
+    assert parts.path == "/search/vacancy", "на /vacancies у zarplata не поиск, а одна карточка"
     assert params(url)["text"] == "python"
     assert params(url)["order_by"] == "publication_time"
 

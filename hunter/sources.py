@@ -14,10 +14,11 @@ class Source:
 
 
 # Оба сайта работают на одном движке: имена параметров совпадают,
-# различаются только домен и путь поиска.
+# различаются только домен. Путь выдачи у обоих /search/vacancy: на
+# /vacancies у zarplata лежит не поиск, а страница с одной-двумя карточками.
 SOURCES: dict[str, Source] = {
     "hh": Source("hh", "https://hh.ru", "/search/vacancy"),
-    "zarplata": Source("zarplata", "https://www.zarplata.ru", "/vacancies"),
+    "zarplata": Source("zarplata", "https://www.zarplata.ru", "/search/vacancy"),
 }
 
 
