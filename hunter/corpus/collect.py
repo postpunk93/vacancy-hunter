@@ -80,8 +80,14 @@ def collect(corpus: Corpus, fetch_page: FetchPage, query: SearchQuery, role: str
         report.notes.append(
             f"{source}: не поддерживает {', '.join(ignored)} — проигнорировано"
         )
+    supported = platform.search_period(query.search_period)
+    if supported < query.search_period:
+        report.notes.append(
+            f"{source}: смотрели за {supported} дн. — больше площадка не отдаёт"
+        )
     counted: set[int] = set()
-    for page in range(query.max_pages):
+    seen_external: set[str] = set()
+    for page in range(min(query.max_pages, platform.max_pages)):
         if page:
             wait()
         url = platform.search_url(query, page)
@@ -115,7 +121,11 @@ def collect(corpus: Corpus, fetch_page: FetchPage, query: SearchQuery, role: str
                 report.cards += 1
                 report.new += is_new
         report.pages += 1
-        if len(cards) < platform.page_size:
+        # Страница без единой новой карточки значит, что выдача кончилась
+        # или площадка добила её «похожими»: листать дальше незачем.
+        fresh = {card.external_id for card in cards} - seen_external
+        seen_external |= {card.external_id for card in cards}
+        if not fresh or len(cards) < platform.page_size:
             break
     return report
 

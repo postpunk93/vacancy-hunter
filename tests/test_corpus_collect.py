@@ -263,3 +263,62 @@ def test_collect_warns_about_unsupported_filters(corpus):
     assert report.cards >= 40
     assert any("salary" in note for note in report.notes)
     assert any("superjob" in line for line in report.summary().splitlines())
+
+
+class FakePlatform:
+    """Площадка с жёсткими границами: проверяем, что сбор их уважает."""
+
+    page_size = 1
+    max_pages = 2
+    name = "fake"
+
+    def search_url(self, query, page=0):
+        return f"https://fake.test/{page}"
+
+    def search_period(self, days):
+        return days
+
+    def unsupported(self, query):
+        return ()
+
+    def parse_cards(self, page_html):
+        return get("hh").parse_cards(search_page([search_card(int(page_html))]))
+
+
+def test_collect_caps_pages_by_platform_limit(corpus, monkeypatch):
+    monkeypatch.setattr("hunter.corpus.collect.get", lambda name: FakePlatform())
+    query = SearchQuery(name="a", text="редактор", max_pages=10)
+
+    report = collect(corpus, lambda url: url.rsplit("/", 1)[1], query, "author",
+                     source="superjob")
+
+    assert report.pages == 2, "листает не больше, чем отдаёт площадка"
+
+
+def test_page_without_new_ids_stops_pagination(corpus):
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return SUPERJOB_PAGE
+
+    query = SearchQuery(name="a", text="редактор удаленно", max_pages=5,
+                        area=113, only_with_salary=False)
+
+    report = collect(corpus, fetch, query, "author", source="superjob")
+
+    # Первая страница обработана, вторая оказалась той же — дальше не листаем.
+    assert report.pages == 2
+    assert len(calls) == 2, "третья страница не запрашивается"
+    assert report.cards == 42, "повторы второй страницы не задваивают счёт"
+
+
+def test_collect_notes_the_shortened_period(corpus):
+    url = get("superjob").search_url(SearchQuery(name="a", text="редактор удаленно",
+                                                 area=113, only_with_salary=False), 0)
+    query = SearchQuery(name="a", text="редактор удаленно", search_period=30,
+                        max_pages=1, area=113, only_with_salary=False)
+
+    report = collect(corpus, Site({url: SUPERJOB_PAGE}), query, "author", source="superjob")
+
+    assert any("7" in note and "дн" in note for note in report.notes)

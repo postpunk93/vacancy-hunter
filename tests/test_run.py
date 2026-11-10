@@ -1157,3 +1157,27 @@ def test_same_query_name_does_not_mix_roles():
         ("author", [first]),
         ("promo", [second]),
     ]
+
+
+def test_repeated_page_stops_the_pass_pagination():
+    """Выдача superjob, повторяющая одну и ту же страницу, не листается впустую."""
+    from pathlib import Path
+
+    page = (Path(__file__).parent / "fixtures" / "superjob_search_sales.html").read_text(
+        encoding="utf-8"
+    )
+    config = Config(
+        sources=("superjob",),
+        queries=(SearchQuery(name="author", text="редактор удаленно", area=113,
+                             only_with_salary=False, search_period=7, max_pages=5),),
+    )
+    calls = []
+
+    def fetch_page(url):
+        calls.append(url)
+        return page
+
+    run_pass(config=config, store=Store(":memory:"), fetch_page=fetch_page,
+             send=Sender(), now=NOW)
+
+    assert len(calls) == 2, "вторая страница та же — третью не запрашиваем"

@@ -85,7 +85,8 @@ def _collect(
                     f"{source}: не поддерживает {', '.join(ignored)} — проигнорировано"
                 )
             query_for_url = replace(query, text=text)
-            for page in range(query.max_pages):
+            seen_keys: set[str] = set()
+            for page in range(min(query.max_pages, platform.max_pages)):
                 if not first_request:
                     pause(REQUEST_PAUSE_SECONDS)
                 first_request = False
@@ -119,7 +120,11 @@ def _collect(
                     )
                     break
                 collected.extend(card.vacancy for card in found)
-                if len(found) < platform.page_size:
+                # Страница без новых карточек — выдача кончилась или площадка
+                # добила её «похожими»: дальше листать незачем.
+                fresh = {card.key for card in found} - seen_keys
+                seen_keys |= {card.key for card in found}
+                if not fresh or len(found) < platform.page_size:
                     break
 
         groups.append((query.name, collected))
