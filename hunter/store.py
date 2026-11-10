@@ -70,10 +70,11 @@ class Store:
         return removed
 
     def get_text(self, key: str) -> FullText | None:
-        # id у zarplata те же, что у hh (кросспостинг): префикс источника не нужен.
-        try:
-            vacancy_id = int(key.split(":", 1)[1])
-        except (IndexError, ValueError):
+        # Ключ — площадка и внешний id: одинаковое число у двух площадок
+        # не должно отдать текст чужой вакансии.
+        source, _, external_id = key.partition(":")
+        vacancy_id = self.corpus.find_hh_engine(source or "hh", external_id)
+        if vacancy_id is None:
             return None
         row = self._conn.execute(
             "SELECT description, key_skills FROM vacancies "

@@ -389,3 +389,29 @@ def test_v2_applications_survive_the_migration_to_nullable_status(tmp_path):
     conn = sqlite3.connect(path)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
     conn.close()
+
+
+def test_zarplata_score_keys_survive_the_migration(tmp_path):
+    """До v4 площадка в базе не хранилась, и оценка могла лежать под
+    `zarplata:<id>`. Строка после миграции — hh, ключ надо привести к ней,
+    иначе оценка молча пропадёт из latest_scores."""
+    path = tmp_path / "db.sqlite"
+    conn = sqlite3.connect(path)
+    for sql in _MIGRATIONS[:3]:
+        conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 3")
+    conn.execute(
+        "INSERT INTO vacancies (id, name, company, url, first_seen_at, last_seen_at) "
+        "VALUES (9, 'Редактор', 'АСТ', 'https://hh.ru/vacancy/9', 't', 't')"
+    )
+    conn.execute(
+        "INSERT INTO scores (key, criteria_hash, score, why, flags, scored_at) "
+        "VALUES ('zarplata:9', 'h', 6, 'ok', '[]', '2026-11-02')"
+    )
+    conn.execute("INSERT INTO seen (key, first_seen_at) VALUES ('zarplata:9', 't')")
+    conn.commit()
+    conn.close()
+
+    with Corpus.open(path) as corpus:
+        assert corpus.query("SELECT vacancy_id, score FROM latest_scores")[1] == [(9, 6)]
+        assert corpus.query("SELECT key FROM seen")[1] == [("hh:9",)]

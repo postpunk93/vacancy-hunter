@@ -143,6 +143,13 @@ _MIGRATIONS = (
     ALTER TABLE vacancies ADD COLUMN external_id TEXT;
     UPDATE vacancies SET external_id = CAST(id AS TEXT);
     CREATE UNIQUE INDEX vacancies_source_external ON vacancies(source, external_id);
+    -- До v4 площадка в базе не хранилась, и ключи могли быть с префиксом
+    -- zarplata. Строки теперь hh (id общие), значит и ключи приводим к hh,
+    -- иначе прежние оценки и отметки «видели» пропадут из вьюхи.
+    UPDATE scores SET key = 'hh:' || substr(key, instr(key, ':') + 1)
+      WHERE key LIKE 'zarplata:%';
+    UPDATE seen SET key = 'hh:' || substr(key, instr(key, ':') + 1)
+      WHERE key LIKE 'zarplata:%';
     DROP VIEW latest_scores;
     CREATE VIEW latest_scores AS
     SELECT vacancy_id, score, why, flags, scored_at FROM (
@@ -301,6 +308,15 @@ class Corpus:
         ).fetchone()
         return None if row is None else int(row[0])
 
+    def find_hh_engine(self, source: str, external_id: str) -> int | None:
+        """У hh и zarplata одно пространство id и одна страница вакансии:
+        строка, заведённая с одного сайта, находится и по ссылке с другого."""
+        vacancy_id = self.find(source, external_id)
+        if vacancy_id is None and source in ("hh", "zarplata"):
+            other = "zarplata" if source == "hh" else "hh"
+            vacancy_id = self.find(other, external_id)
+        return vacancy_id
+
     def resolve(self, source: str, external_id: str) -> int:
         vacancy_id = self.find(source, external_id)
         if vacancy_id is None:
@@ -386,6 +402,10 @@ class Corpus:
         vacancy_id = self.find(detail.source, detail.external_id)
         if vacancy_id is None:
             vacancy_id = self.upsert_card(detail.row)[1]
+        self.update_detail(vacancy_id, detail)
+
+    def update_detail(self, vacancy_id: int, detail: Detail) -> None:
+        """Текст и метаданные страницы — в уже известную строку."""
         self._conn.execute(
             "UPDATE vacancies SET description = ?, key_skills = ?, status = ?, "
             "detail_json = ?, detail_fetched_at = ? WHERE id = ?",

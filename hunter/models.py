@@ -36,11 +36,11 @@ class SearchQuery:
             object.__setattr__(self, "role", self.name)
 
     def text_for(self, source: str) -> str | None:
-        """Чем искать на площадке: своя формулировка, иначе общий текст.
-        Карта задана, а площадки в ней нет — запрос сюда не идёт вовсе."""
-        if not self.text_by_source:
-            return self.text
-        return self.text_by_source.get(source)
+        """Чем искать на площадке: своя формулировка из карты, иначе общий текст.
+        Значение null в карте — «на эту площадку запрос не отправлять»."""
+        if source in self.text_by_source:
+            return self.text_by_source[source]
+        return self.text
 
 
 @dataclass(frozen=True, slots=True)

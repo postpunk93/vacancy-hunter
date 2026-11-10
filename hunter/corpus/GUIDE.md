@@ -160,7 +160,7 @@ N самых свежих вакансий — так пилотная пачк�
 | Колонка | Смысл |
 |---|---|
 | `id` | суррогатный номер строки в базе; у вакансий hh совпадает с id вакансии hh |
-| `source` | площадка: `hh` (сюда же zarplata — у неё те же id) или `superjob` |
+| `source` | площадка: `hh`, `zarplata` (id общие с hh) или `superjob` |
 | `external_id` | id вакансии на площадке; вместе с `source` — ключ вакансии |
 | `name`, `company`, `company_id` | название, работодатель |
 | `url` | ссылка на страницу вакансии на площадке |
@@ -168,7 +168,7 @@ N самых свежих вакансий — так пилотная пачк�
 | `published_at` | дата публикации, ISO 8601; NULL — площадка не отдала (superjob её не отдаёт в выдаче) |
 | `salary_from`, `salary_to`, `currency` | вилка; NULL — не указана |
 | `gross` | 1 — до вычета налогов, 0 — на руки, NULL — неизвестно |
-| `salary_frequency` | частота выплат: `MONTHLY`, `TWICE_PER_MONTH`, `PER_PROJECT`, … |
+| `salary_frequency` | частота выплат: у hh `MONTHLY`, `TWICE_PER_MONTH`, `PER_PROJECT`, у superjob — период оплаты (`MONTH`, `HOUR`) |
 | `experience` | `noExperience`, `between1And3`, `between3And6`, `moreThan6` |
 | `work_formats` | JSON-массив: `REMOTE`, `HYBRID`, `ON_SITE`, `FIELD_WORK` |
 | `employment_form` | `FULL`, `PART`, `PROJECT`, … |

@@ -239,10 +239,10 @@ FIXTURES = Path(__file__).parent / "fixtures"
 SUPERJOB_PAGE = (FIXTURES / "superjob_search_sales.html").read_text(encoding="utf-8")
 
 
-def test_collect_skips_platform_without_its_own_text(corpus):
-    """Карта формулировок задана, а площадки в ней нет — запрос не уходит."""
+def test_collect_skips_platform_marked_as_null(corpus):
+    """null в карте — «на эту площадку запрос не отправлять»."""
     query = SearchQuery(name="author", text="NAME:(редактор)",
-                        text_by_source={"hh": "редактор"}, max_pages=1)
+                        text_by_source={"superjob": None}, max_pages=1)
     site = Site({})
 
     report = collect(corpus, site, query, "author", source="superjob")
@@ -322,3 +322,16 @@ def test_collect_notes_the_shortened_period(corpus):
     report = collect(corpus, Site({url: SUPERJOB_PAGE}), query, "author", source="superjob")
 
     assert any("7" in note and "дн" in note for note in report.notes)
+
+
+def test_fetch_reuses_the_same_vacancy_from_the_other_hh_site(corpus):
+    """У hh и zarplata одно пространство id: докачка не должна заводить дубль."""
+    zarplata = get("zarplata").parse_cards(search_page([search_card(5)]))[0]
+    corpus.note_seen(zarplata.row)
+
+    site = Site({vacancy_url(5): vacancy_page(5)})
+    report = fetch_details(corpus, site, refs([5]))
+
+    assert report.fetched == ["5"]
+    assert corpus.query("SELECT source, external_id FROM vacancies")[1] == [("zarplata", "5")]
+    assert corpus.vacancy(corpus.find("zarplata", "5"))["description"]

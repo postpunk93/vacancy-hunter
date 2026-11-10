@@ -56,9 +56,11 @@ def vacancy_from_row(row: Mapping) -> Vacancy:
     """Строка таблицы vacancies → вакансия для оценки. Чего в корпусе нет,
     оценке не нужно: зарплатный период и признак рекламы — пустые."""
     gross = row["gross"]
+    keys = row.keys() if hasattr(row, "keys") else row
     return Vacancy(
-        source="hh",
-        vacancy_id=str(row["id"]),
+        # Старая схема v1 знала только hh — для неё колонок source/external_id нет.
+        source=row["source"] if "source" in keys else "hh",
+        vacancy_id=(row["external_id"] if "external_id" in keys else str(row["id"])),
         name=row["name"],
         company=row["company"],
         url=row["url"],

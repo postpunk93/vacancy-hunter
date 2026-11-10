@@ -460,7 +460,7 @@ queries:
 
     assert cfg.sources == ("hh", "superjob")
     assert cfg.queries[0].text_for("superjob") == "редактор удаленно"
-    assert cfg.queries[0].text_for("hh") is None, "карта задана — hh без своей строки не идёт"
+    assert cfg.queries[0].text_for("hh") == "NAME:(редактор) NOT NAME:(стажёр)"
     assert cfg.queries[1].text_for("superjob") is None
 
 

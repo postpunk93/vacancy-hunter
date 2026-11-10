@@ -170,7 +170,8 @@ def fetch_details(corpus: Corpus, fetch_page: FetchPage, refs: list[tuple[str, s
     requested = False
     for index, (source, external_id) in enumerate(refs):
         ref = format_ref(source, external_id)
-        vacancy_id = corpus.find(source, external_id)
+        # hh и zarplata делят id: строка могла прийти с другого сайта.
+        vacancy_id = corpus.find_hh_engine(source, external_id)
         if not refresh and vacancy_id is not None and corpus.has_detail(vacancy_id):
             report.skipped.append(ref)
             if role:
@@ -203,8 +204,14 @@ def fetch_details(corpus: Corpus, fetch_page: FetchPage, refs: list[tuple[str, s
             ))
             continue
 
-        corpus.save_detail(detail)
+        if vacancy_id is None:
+            corpus.save_detail(detail)
+            vacancy_id = corpus.find_hh_engine(detail.source, detail.external_id)
+        else:
+            # Строка уже была (возможно, с соседнего сайта): дополняем её,
+            # а не заводим вторую.
+            corpus.update_detail(vacancy_id, detail)
         if role:
-            corpus.add_hit(corpus.find(detail.source, detail.external_id), role, MANUAL_QUERY)
+            corpus.add_hit(vacancy_id, role, MANUAL_QUERY)
         report.fetched.append(ref)
     return report

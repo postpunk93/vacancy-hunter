@@ -165,3 +165,38 @@ def test_superjob_supports_remote_and_does_not_complain_about_it():
 
 def test_hh_does_not_report_unsupported_filters():
     assert get("hh").unsupported(SearchQuery(name="a", text="x", salary=1)) == ()
+
+
+def _state_page(state):
+    import json
+
+    return f"<html><script>window.APP_STATE={json.dumps(state)}</script></html>"
+
+
+def test_card_without_entities_is_a_parse_error():
+    state = {
+        "pageInfo": {"pageType": "search-vacancy"},
+        "responses": {"lists": {"vacancy": {"u": {"result": ["1"]}}}},
+        "entities": {"vacancy": {"1": {"id": "1", "relationships": {}}}},
+    }
+
+    with pytest.raises(ParseError, match="сущности"):
+        get("superjob").parse_cards(_state_page(state))
+
+
+def test_broken_card_is_a_parse_error_not_a_key_error():
+    """Сырой KeyError из карточки прошёл бы мимо run (он ловит ParseError)
+    и уронил бы весь проход, включая дайджест."""
+    state = {
+        "pageInfo": {"pageType": "search-vacancy"},
+        "responses": {"lists": {"vacancy": {"u": {"result": ["1"]}}}},
+        "entities": {
+            # у вакансии нет своего id — его ждёт разбор вилки
+            "vacancy": {"1": {"relationships": {}}},
+            "vacancyMainInfo": {"1": {"id": "1", "attributes": {"profession": "Редактор"},
+                                      "relationships": {}}},
+        },
+    }
+
+    with pytest.raises(ParseError, match="сменил формат"):
+        get("superjob").parse_cards(_state_page(state))

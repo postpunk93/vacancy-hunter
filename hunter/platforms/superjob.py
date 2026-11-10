@@ -264,7 +264,15 @@ class Superjob:
             ids = block["result"]
         except (KeyError, TypeError, StopIteration) as exc:
             raise ParseError("в APP_STATE нет responses.lists.vacancy.result") from exc
-        return [_card(state, str(vacancy_id)) for vacancy_id in ids]
+        try:
+            return [_card(state, str(vacancy_id)) for vacancy_id in ids]
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            # Одна странная карточка не должна ронять весь проход:
+            # run ловит ParseError, а не сырые ошибки разбора.
+            raise ParseError(
+                f"Карточка вакансии не разобралась "
+                f"({exc.__class__.__name__}: {exc}) — сайт сменил формат"
+            ) from exc
 
     def vacancy_url(self, external_id: str) -> str:
         return VACANCY_URL.format(id=external_id)

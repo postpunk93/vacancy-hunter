@@ -47,9 +47,7 @@ def _resolve(corpus: Corpus, ref: str) -> tuple[int, str]:
     У hh и zarplata одно пространство id: если вакансия попала в базу
     с zarplata, ссылка на hh всё равно её найдёт."""
     source, external_id = parse_ref(ref)
-    vacancy_id = corpus.find(source, external_id)
-    if vacancy_id is None and source == "hh":
-        vacancy_id = corpus.find("zarplata", external_id)
+    vacancy_id = corpus.find_hh_engine(source, external_id)
     if vacancy_id is None:
         raise CorpusError(
             f"Вакансии {external_id} нет в базе. Сначала: vacancies fetch {ref}"
@@ -194,9 +192,7 @@ def _cmd_show(args, fetch_page, sleep) -> int:
     with Corpus.open(args.db) as corpus:
         for source, external_id in refs:
             ref = format_ref(source, external_id)
-            vacancy_id = corpus.find(source, external_id)
-            if vacancy_id is None and source == "hh":
-                vacancy_id = corpus.find("zarplata", external_id)
+            vacancy_id = corpus.find_hh_engine(source, external_id)
             if vacancy_id is None:
                 missing.append(ref)
                 continue

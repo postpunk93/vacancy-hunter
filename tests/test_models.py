@@ -44,12 +44,14 @@ def test_text_falls_back_to_common_text():
     assert query.text_for("superjob") == "редактор"
 
 
-def test_missing_platform_text_skips_platform():
+def test_platform_absent_from_map_falls_back_to_common_text():
+    """Карта переопределяет площадки, но не выключает остальные: иначе запрос
+    с одной формулировкой под superjob молча перестаёт идти на hh."""
     from hunter.models import SearchQuery
 
     query = SearchQuery(name="a", text="NAME:(редактор)",
                         text_by_source={"superjob": "редактор"})
-    assert query.text_for("hh") is None
+    assert query.text_for("hh") == "NAME:(редактор)"
     assert query.text_for("superjob") == "редактор"
 
 

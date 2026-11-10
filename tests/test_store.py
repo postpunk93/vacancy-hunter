@@ -136,3 +136,24 @@ def test_purge_cleans_seen_and_scores_but_keeps_corpus_texts(tmp_path):
         assert store.get_score("hh:1", "h") is None
         assert store.get_score("hh:2", "h") is not None
         assert store.get_text("hh:1") == FullText("Текст", ())
+
+
+def test_get_text_uses_source_and_external_id(tmp_path):
+    """Ключ — площадка и внешний id. Одинаковое число у двух площадок
+    не должно отдавать текст чужой вакансии."""
+    db = tmp_path / "job-hunter.db"
+    with Store(db) as store:
+        hh_row = vacancy_card_row(make_vacancy(vacancy_id="7"))
+        hh_row["description"] = "текст hh"
+        sj_row = vacancy_card_row(make_vacancy(vacancy_id="7", source="superjob",
+                                               url="https://russia.superjob.ru/vakansii/x-7.html"))
+        sj_row["description"] = "текст superjob"
+        store.corpus.note_seen(hh_row)
+        store.corpus.note_seen(sj_row)
+        store.corpus._conn.execute("UPDATE vacancies SET description = 'текст hh' WHERE source = 'hh'")
+        store.corpus._conn.execute(
+            "UPDATE vacancies SET description = 'текст superjob' WHERE source = 'superjob'")
+        store.corpus._conn.commit()
+
+        assert store.get_text("hh:7").description == "текст hh"
+        assert store.get_text("superjob:7").description == "текст superjob"
