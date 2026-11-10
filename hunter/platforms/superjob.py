@@ -12,6 +12,7 @@ import re
 from urllib.parse import urlencode
 
 from ..models import UNKNOWN_COMPANY, UNKNOWN_VACANCY_NAME, SearchQuery
+from ..corpus.markdown import html_to_markdown
 from ..parse import ParseError
 from .base import Captcha, Card, Detail
 
@@ -40,6 +41,15 @@ _EXPERIENCE = {
 }
 
 _CURRENCY = {"rub": "RUR", "usd": "USD", "eur": "EUR"}
+
+# employmentType по schema.org → код hh, который ждёт остальной код.
+_EMPLOYMENT = {
+    "FULL_TIME": "FULL",
+    "PART_TIME": "PART",
+    "CONTRACTOR": "PROJECT",
+    "TEMPORARY": "PROJECT",
+    "INTERN": "PROBATION",
+}
 
 _VACANCY_PATH = re.compile(r"/vakansii/(?:[^/]*-)?(\d+)\.html")
 _JOB_POSTING = re.compile(
@@ -204,6 +214,20 @@ def _card(state: dict, vacancy_id: str) -> Card:
     )
 
 
+def _job_posting(page_html: str) -> dict:
+    """JSON-LD JobPosting со страницы вакансии."""
+    for block in _JOB_POSTING.findall(page_html):
+        try:
+            data = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and data.get("@type") == "JobPosting":
+            return data
+    if _STATE_MARKER not in page_html:
+        raise Captcha("в ответе superjob нет ни JobPosting, ни APP_STATE — похоже на капчу")
+    raise ParseError("на странице superjob нет JobPosting — сайт сменил формат")
+
+
 class Superjob:
     """Площадка superjob.ru."""
 
@@ -246,7 +270,55 @@ class Superjob:
         return VACANCY_URL.format(id=external_id)
 
     def parse_detail(self, page_html: str) -> Detail:
-        raise NotImplementedError("страница вакансии superjob — в Task 6")
+        posting = _job_posting(page_html)
+        url = posting.get("url") or ""
+        external_id = self.parse_ref(url)
+        if external_id is None:
+            raise ParseError(
+                "в JobPosting нет ссылки на вакансию — сайт сменил формат"
+            )
+        salary = posting.get("baseSalary") or {}
+        value = salary.get("value") or {}
+        currency = salary.get("currency")
+        employment = posting.get("employmentType")
+        address = ((posting.get("jobLocation") or {}).get("address") or {})
+        name = posting.get("title") or UNKNOWN_VACANCY_NAME
+        company = ((posting.get("hiringOrganization") or {}).get("name")
+                   or UNKNOWN_COMPANY)
+        row = {
+            "source": "superjob",
+            "external_id": external_id,
+            "name": name,
+            "company": company,
+            # identifier в JobPosting — id компании, а не вакансии.
+            "company_id": None,
+            "url": url or VACANCY_URL.format(id=external_id),
+            "area": address.get("addressLocality"),
+            "published_at": posting.get("datePosted"),
+            "salary_from": value.get("minValue"),
+            "salary_to": value.get("maxValue"),
+            "currency": _CURRENCY.get((currency or "").lower(), currency),
+            "gross": None,
+            "salary_frequency": value.get("unitText"),
+            "experience": None,
+            "work_formats": json.dumps([]),
+            "employment_form": _EMPLOYMENT.get(employment, employment),
+            "employer_trusted": None,
+            "employer_category": None,
+            "antifraud_power": None,
+            "responses_count": None,
+            "card_json": None,
+        }
+        return Detail(
+            source="superjob",
+            external_id=external_id,
+            row=row,
+            description=html_to_markdown(posting.get("description") or ""),
+            # Ключевых навыков на странице superjob нет.
+            key_skills=[],
+            status="active",
+            raw=posting,
+        )
 
     def parse_ref(self, ref: str) -> str | None:
         match = _VACANCY_PATH.search(ref)

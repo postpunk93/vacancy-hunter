@@ -102,3 +102,50 @@ def test_platform_is_registered_and_ref_forms_work():
     assert parse_ref("https://russia.superjob.ru/vakansii/x-52295791.html") == (
         "superjob", "52295791")
     assert format_ref("superjob", "52295791") == "superjob:52295791"
+
+
+def test_detail_comes_from_jsonld():
+    html = (FIXTURES / "superjob_vacancy.html").read_text(encoding="utf-8")
+
+    detail = get("superjob").parse_detail(html)
+
+    assert detail.source == "superjob" and detail.external_id == "52295791"
+    assert detail.row["name"].startswith("Ведущий менеджер")
+    assert detail.row["company"] == "Уральский банк реконструкции и развития"
+    assert detail.row["published_at"].startswith("2026-10-30")
+    assert detail.row["salary_from"] == 75000
+    assert detail.row["salary_to"] is None
+    assert detail.row["currency"] == "RUR"
+    assert detail.row["area"] == "Улан-Удэ"
+    assert detail.row["employment_form"] == "FULL"
+    assert detail.description and "<p>" not in detail.description
+    assert detail.key_skills == []
+    assert detail.status == "active"
+
+
+def test_detail_page_without_jobposting_is_a_parse_error():
+    with pytest.raises(ParseError, match="JobPosting"):
+        get("superjob").parse_detail('<html><script>window.APP_STATE={}</script></html>')
+
+
+def test_detail_page_without_anything_is_a_captcha():
+    with pytest.raises(Captcha):
+        get("superjob").parse_detail("<html><body>captcha</body></html>")
+
+
+def test_superjob_link_adds_vacancy_end_to_end(tmp_path):
+    from hunter.corpus.collect import fetch_details
+    from hunter.corpus.store import Corpus
+
+    html = (FIXTURES / "superjob_vacancy.html").read_text(encoding="utf-8")
+
+    def fetch_page(url):
+        assert "52295791" in url, url
+        return html
+
+    with Corpus.open(tmp_path / "db.sqlite", create=True) as corpus:
+        report = fetch_details(corpus, fetch_page, [("superjob", "52295791")])
+        assert report.fetched == ["superjob:52295791"]
+        vacancy_id = corpus.find("superjob", "52295791")
+        assert corpus.vacancy(vacancy_id)["description"]
+        assert corpus.vacancy(vacancy_id)["published_at"].startswith("2026-10-30")
