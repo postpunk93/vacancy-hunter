@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from urllib.parse import urlencode, urlparse
 
@@ -32,6 +33,9 @@ REMOTE_SCHEDULE_ID = 6
 _MARKER = "window.__NUXT__"
 # Слова, по которым страница без состояния опознаётся как капча, а не редизайн.
 _CAPTCHA_MARKERS = ("captcha", "капча", "робот", "подтвердите")
+# Ссылка на вакансию: /vacancy/<цифры>/ на rabota.ru и любом поддомене.
+_HOST = "rabota.ru"
+_VACANCY_PATH = re.compile(r"^/vacancy/(\d+)/?$")
 
 # Подпись валюты до слеша → код, который ждёт остальной код.
 _CURRENCY = {"руб.": "RUR", "руб": "RUR", "rur": "RUR", "rub": "RUR",
@@ -213,3 +217,13 @@ class Rabota:
 
     def vacancy_url(self, external_id: str) -> str:
         return VACANCY_URL.format(id=external_id)
+
+    def parse_ref(self, ref: str) -> str | None:
+        parsed = urlparse(ref.strip())
+        if parsed.scheme not in ("http", "https"):
+            return None
+        host = (parsed.hostname or "").lower()
+        if not (host == _HOST or host.endswith("." + _HOST)):
+            return None
+        match = _VACANCY_PATH.match(parsed.path)
+        return match.group(1) if match else None
