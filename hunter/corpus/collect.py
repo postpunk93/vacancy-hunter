@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from ..fetch import Blocked, FetchError, NotFound
@@ -28,11 +28,16 @@ def _no_wait() -> None:
 @dataclass
 class CollectReport:
     role: str
+    source: str = "hh"
     cards: int = 0
     new: int = 0
     pages: int = 0
     error: str | None = None
     blocked: str | None = None
+    # Почему запрос не пошёл на площадку (нет формулировки под неё).
+    skipped: str | None = None
+    # Что площадка проигнорировала или за сколько дней смотрела.
+    notes: list[str] = field(default_factory=list)
 
     @property
     def existing(self) -> int:
@@ -45,11 +50,15 @@ class CollectReport:
         return EXIT_PARTIAL if self.error else EXIT_OK
 
     def summary(self) -> str:
+        if self.skipped:
+            return f"{self.role} ({self.source}): {self.skipped}"
         lines = [
-            f"{self.role}: {plural(self.cards, 'карточка', 'карточки', 'карточек')}, "
+            f"{self.role} ({self.source}): "
+            f"{plural(self.cards, 'карточка', 'карточки', 'карточек')}, "
             f"новых {self.new}, уже были {self.existing} "
             f"(страниц выдачи: {self.pages})"
         ]
+        lines += self.notes
         if self.blocked:
             lines.append(f"ОСТАНОВЛЕНО — блокировка: {self.blocked}")
         if self.error:
@@ -59,8 +68,18 @@ class CollectReport:
 
 def collect(corpus: Corpus, fetch_page: FetchPage, query: SearchQuery, role: str,
             wait: Callable[[], None] = _no_wait, *, source: str = "hh") -> CollectReport:
-    report = CollectReport(role)
+    report = CollectReport(role, source)
     platform = get(source)
+    text = query.text_for(source)
+    if text is None:
+        report.skipped = f"не отправлен: нет формулировки запроса под {source}"
+        return report
+    query = replace(query, text=text)
+    ignored = platform.unsupported(query)
+    if ignored:
+        report.notes.append(
+            f"{source}: не поддерживает {', '.join(ignored)} — проигнорировано"
+        )
     counted: set[int] = set()
     for page in range(query.max_pages):
         if page:

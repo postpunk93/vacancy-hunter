@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 
 UNKNOWN_VACANCY_NAME = "(без названия)"
@@ -23,12 +24,23 @@ class SearchQuery:
     only_with_salary: bool = True
     search_period: int = 1
     max_pages: int = 1
+    # Текст запроса на языке конкретной площадки: у hh свой синтаксис
+    # (NAME:, NOT, AND), у остальных — обычные слова. None — на эту
+    # площадку запрос не отправлять.
+    text_by_source: Mapping[str, str | None] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Роль всегда заполнена: без неё дайджест и статистика потеряли бы
         # блок, а тесты и CLI создают запрос без неё.
         if not self.role:
             object.__setattr__(self, "role", self.name)
+
+    def text_for(self, source: str) -> str | None:
+        """Чем искать на площадке: своя формулировка, иначе общий текст.
+        Карта задана, а площадки в ней нет — запрос сюда не идёт вовсе."""
+        if not self.text_by_source:
+            return self.text
+        return self.text_by_source.get(source)
 
 
 @dataclass(frozen=True, slots=True)

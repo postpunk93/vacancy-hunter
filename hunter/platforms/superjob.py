@@ -320,6 +320,22 @@ class Superjob:
             raw=posting,
         )
 
+    def unsupported(self, query: SearchQuery) -> tuple[str, ...]:
+        """Что из запроса площадка проигнорирует. Молчать об этом нельзя:
+        владелец решит, что фильтр применился."""
+        ignored = []
+        if query.area != 113:
+            ignored.append("area")
+        if query.salary is not None:
+            ignored.append("salary")
+        if query.experience:
+            ignored.append("experience")
+        if query.only_with_salary:
+            ignored.append("only_with_salary")
+        if query.work_format not in (None, "remote"):
+            ignored.append("work_format")
+        return tuple(ignored)
+
     def parse_ref(self, ref: str) -> str | None:
         match = _VACANCY_PATH.search(ref)
         return match.group(1) if match else None

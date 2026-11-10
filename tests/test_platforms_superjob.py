@@ -149,3 +149,19 @@ def test_superjob_link_adds_vacancy_end_to_end(tmp_path):
         vacancy_id = corpus.find("superjob", "52295791")
         assert corpus.vacancy(vacancy_id)["description"]
         assert corpus.vacancy(vacancy_id)["published_at"].startswith("2026-10-30")
+
+
+def test_superjob_reports_unsupported_filters():
+    query = SearchQuery(name="a", text="x", area=1, salary=100000,
+                        experience=("between1And3",), only_with_salary=True)
+    assert set(get("superjob").unsupported(query)) == {
+        "area", "salary", "experience", "only_with_salary"}
+
+
+def test_superjob_supports_remote_and_does_not_complain_about_it():
+    query = _query(area=113, only_with_salary=False)
+    assert get("superjob").unsupported(query) == ()
+
+
+def test_hh_does_not_report_unsupported_filters():
+    assert get("hh").unsupported(SearchQuery(name="a", text="x", salary=1)) == ()

@@ -7,8 +7,9 @@ from pathlib import Path
 import yaml
 
 from .models import SearchQuery
+from .platforms import PLATFORMS
 
-KNOWN_SOURCES = ("hh", "zarplata")
+KNOWN_SOURCES = tuple(PLATFORMS)
 
 _QUERY_FIELDS = {
     "name",
@@ -21,6 +22,7 @@ _QUERY_FIELDS = {
     "only_with_salary",
     "search_period",
     "max_pages",
+    "text_by_source",
 }
 
 
@@ -117,6 +119,26 @@ def load_config(path: Path) -> Config:
                 f"Запрос №{number}: experience должен быть строкой или списком строк, "
                 f"получено: {experience!r}"
             )
+
+        texts = merged.get("text_by_source") or {}
+        if not isinstance(texts, dict):
+            raise ConfigError(
+                f"Запрос №{number}: text_by_source — словарь «площадка: текст», "
+                f"получено: {texts!r}"
+            )
+        unknown_texts = sorted(set(texts) - set(KNOWN_SOURCES))
+        if unknown_texts:
+            raise ConfigError(
+                f"Запрос №{number}: text_by_source — неизвестные площадки: "
+                f"{', '.join(unknown_texts)}. Доступны: {', '.join(KNOWN_SOURCES)}"
+            )
+        for platform, text in texts.items():
+            if text is not None and (not isinstance(text, str) or not text.strip()):
+                raise ConfigError(
+                    f"Запрос №{number}: text_by_source[{platform}] — непустая строка "
+                    f"или null (не отправлять запрос на площадку), получено: {text!r}"
+                )
+        merged["text_by_source"] = texts
 
         period = merged.get("search_period", 1)
         if isinstance(period, bool) or not isinstance(period, int) or not 1 <= period <= MAX_PERIOD_DAYS:

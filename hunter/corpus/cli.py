@@ -102,7 +102,10 @@ def _cmd_collect(args, fetch_page, sleep) -> int:
         max_pages=args.pages,
     )
     with Corpus.open(args.db) as corpus, _page_fetcher(fetch_page) as fetch:
-        report = collect(corpus, fetch, query, args.role, wait=_make_wait(args.delay, sleep))
+        report = collect(
+            corpus, fetch, query, args.role,
+            wait=_make_wait(args.delay, sleep), source=args.source,
+        )
     print(report.summary())
     return report.exit_code
 
@@ -399,6 +402,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="создать папку me/ и базу; существующее не трогает")
 
     p = sub.add_parser("collect", help="собрать карточки из выдачи hh под роль")
+    p.add_argument("--source", choices=tuple(PLATFORMS), default="hh",
+                   help="площадка, по которой искать (по умолчанию hh)")
     p.add_argument("--role", required=True, help="метка роли, например backend")
     p.add_argument("--text", required=True, help="поисковый запрос hh (AND, OR, NOT, NAME:)")
     p.add_argument("--area", type=int, default=113, help="113 — Россия, 1 — Москва, 2 — СПб")

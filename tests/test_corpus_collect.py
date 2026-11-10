@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from hunter.corpus.collect import (
@@ -231,3 +233,33 @@ def test_fetch_adds_vacancy_missing_from_base(corpus):
     assert report.fetched == ["7"]
     assert corpus.find("hh", "7") is not None
     assert corpus.vacancy(7)["description"]
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+SUPERJOB_PAGE = (FIXTURES / "superjob_search_sales.html").read_text(encoding="utf-8")
+
+
+def test_collect_skips_platform_without_its_own_text(corpus):
+    """Карта формулировок задана, а площадки в ней нет — запрос не уходит."""
+    query = SearchQuery(name="author", text="NAME:(редактор)",
+                        text_by_source={"hh": "редактор"}, max_pages=1)
+    site = Site({})
+
+    report = collect(corpus, site, query, "author", source="superjob")
+
+    assert report.skipped and "superjob" in report.skipped
+    assert site.calls == []
+    assert report.cards == 0
+
+
+def test_collect_warns_about_unsupported_filters(corpus):
+    query = SearchQuery(name="author", text="редактор удаленно", salary=100000,
+                        only_with_salary=False, area=113, max_pages=1)
+    url = get("superjob").search_url(query, 0)
+    site = Site({url: SUPERJOB_PAGE})
+
+    report = collect(corpus, site, query, "author", source="superjob")
+
+    assert report.cards >= 40
+    assert any("salary" in note for note in report.notes)
+    assert any("superjob" in line for line in report.summary().splitlines())

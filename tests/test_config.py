@@ -441,3 +441,50 @@ queries:
     with pytest.raises(ConfigError, match="role"):
         load_config(path)
 
+
+
+def test_config_accepts_superjob_source_and_texts(tmp_path):
+    path = write(tmp_path, """
+sources: [hh, superjob]
+queries:
+  - name: "Автор"
+    text: "NAME:(редактор) NOT NAME:(стажёр)"
+    text_by_source:
+      superjob: "редактор удаленно"
+  - name: "Промо"
+    text: "продвижение"
+    text_by_source:
+      superjob: null
+""")
+    cfg = load_config(path)
+
+    assert cfg.sources == ("hh", "superjob")
+    assert cfg.queries[0].text_for("superjob") == "редактор удаленно"
+    assert cfg.queries[0].text_for("hh") is None, "карта задана — hh без своей строки не идёт"
+    assert cfg.queries[1].text_for("superjob") is None
+
+
+def test_config_rejects_unknown_platform_in_text_by_source(tmp_path):
+    path = write(tmp_path, """
+sources: [hh]
+queries:
+  - name: "x"
+    text: "y"
+    text_by_source:
+      avito: "z"
+""")
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_config_rejects_non_string_text_by_source(tmp_path):
+    path = write(tmp_path, """
+sources: [hh]
+queries:
+  - name: "x"
+    text: "y"
+    text_by_source:
+      superjob: 5
+""")
+    with pytest.raises(ConfigError):
+        load_config(path)

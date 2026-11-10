@@ -35,3 +35,26 @@ def test_score_without_value_is_not_scored():
 
     assert Score(None, "x").scored is False
     assert Score(7, "x").scored is True
+
+
+def test_text_falls_back_to_common_text():
+    from hunter.models import SearchQuery
+
+    query = SearchQuery(name="a", text="редактор")
+    assert query.text_for("superjob") == "редактор"
+
+
+def test_missing_platform_text_skips_platform():
+    from hunter.models import SearchQuery
+
+    query = SearchQuery(name="a", text="NAME:(редактор)",
+                        text_by_source={"superjob": "редактор"})
+    assert query.text_for("hh") is None
+    assert query.text_for("superjob") == "редактор"
+
+
+def test_null_text_means_do_not_send():
+    from hunter.models import SearchQuery
+
+    query = SearchQuery(name="a", text="редактор", text_by_source={"superjob": None})
+    assert query.text_for("superjob") is None

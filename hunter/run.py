@@ -5,6 +5,7 @@ import logging
 import logging.handlers
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -63,18 +64,33 @@ def _collect(
     blocked_sources: set[str] = set()
     first_request = True
 
+    reported_unsupported: set[str] = set()
+
     for query in config.queries:
         collected = []
         for source in config.sources:
             if source in blocked_sources:
                 continue
+            text = query.text_for(source)
+            if text is None:
+                warnings.append(
+                    f"«{query.name}» не отправлен на {source}: нет запроса для площадки"
+                )
+                continue
+            platform = get(source)
+            ignored = platform.unsupported(query)
+            if ignored and source not in reported_unsupported:
+                reported_unsupported.add(source)
+                warnings.append(
+                    f"{source}: не поддерживает {', '.join(ignored)} — проигнорировано"
+                )
+            query_for_url = replace(query, text=text)
             for page in range(query.max_pages):
                 if not first_request:
                     pause(REQUEST_PAUSE_SECONDS)
                 first_request = False
 
-                platform = get(source)
-                url = platform.search_url(query, page)
+                url = platform.search_url(query_for_url, page)
                 try:
                     page_html = fetch_page(url)
                 except Blocked as exc:

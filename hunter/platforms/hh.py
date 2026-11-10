@@ -275,6 +275,9 @@ class Hh:
     def parse_detail(self, page_html: str) -> Detail:
         return parse_detail(page_html, self._site)
 
+    def unsupported(self, query: SearchQuery) -> tuple[str, ...]:
+        return ()
+
     def parse_ref(self, ref: str) -> str | None:
         ref = ref.strip()
         if ref.isdigit():
