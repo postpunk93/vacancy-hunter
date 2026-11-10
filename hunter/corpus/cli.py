@@ -397,14 +397,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init", help="создать папку me/ и базу; существующее не трогает")
 
-    p = sub.add_parser("collect", help="собрать карточки из выдачи hh под роль")
+    p = sub.add_parser("collect", help="собрать карточки из выдачи площадки под роль")
     p.add_argument("--source", choices=tuple(PLATFORMS), default="hh",
                    help="площадка, по которой искать (по умолчанию hh)")
     p.add_argument("--role", required=True, help="метка роли, например backend")
-    p.add_argument("--text", required=True, help="поисковый запрос hh (AND, OR, NOT, NAME:)")
+    p.add_argument("--text", required=True, help="поисковый запрос: hh понимает AND, OR, NOT и NAME:, остальные площадки — только обычные слова")
     p.add_argument("--area", type=int, default=113, help="113 — Россия, 1 — Москва, 2 — СПб")
     p.add_argument("--days", type=int, choices=(1, 3, 7, 30), default=30)
-    p.add_argument("--pages", type=int, default=5, help=f"страниц по 50, от 1 до {MAX_PAGES}")
+    p.add_argument("--pages", type=int, default=5, help=f"страниц выдачи, от 1 до {MAX_PAGES}")
     p.add_argument("--salary", type=int)
     p.add_argument("--experience", action="append", choices=EXPERIENCE, default=[])
     p.add_argument("--work-format", choices=WORK_FORMATS)

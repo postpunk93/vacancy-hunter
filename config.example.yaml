@@ -1,6 +1,6 @@
 # Скопируйте в config.yaml и правьте под себя.
 
-sources: [hh]          # hh, zarplata, superjob; zarplata отдаёт те же вакансии hh
+sources: [hh]          # hh, zarplata, superjob, rabota; zarplata отдаёт те же вакансии hh
 
 defaults:              # применяются к каждому запросу, если тот не переопределит
   area: 113            # 1 = Москва, 2 = Санкт-Петербург, 113 = вся Россия

@@ -37,7 +37,8 @@
 
 ### `vacancies collect --role R --text T [опции]`
 Собирает карточки из выдачи площадки (без полного текста) и помечает их ролью.
-Площадка по умолчанию — hh; `--source superjob` идёт на superjob.
+Площадка по умолчанию — hh; `--source superjob` идёт на superjob,
+`--source rabota` — на rabota.ru.
 
 ```
 vacancies collect --role backend --text "python AND (backend OR бэкенд) NOT стажёр" \
@@ -49,18 +50,22 @@ vacancies collect --role backend --text "python AND (backend OR бэкенд) NO
 - `--days` 1 | 3 | 7 | 30 (по умолчанию 30). `--pages` 1–40 по 50 карточек (по умолчанию 5).
 - `--salary N`, `--with-salary`, `--experience` (повторяемый), `--work-format remote|hybrid|on_site|field_work`.
 - `--delay` — пауза между запросами, с (по умолчанию 2).
-- `--source hh | zarplata | superjob`. У superjob нет `--area`, `--salary`,
+- `--source hh | zarplata | superjob | rabota`. У superjob нет `--area`, `--salary`,
   `--experience`, `--with-salary` и форматов кроме `remote`: они
   игнорируются, о чём отчёт пишет строкой. Период он смотрит не дальше
   недели. Узкий запрос (одно слово) площадка уводит на SEO-лендинг — это
-  ошибка разбора, уточните формулировку.
+  ошибка разбора, уточните формулировку. У rabota нет `--area` (кроме 113),
+  `--experience`, `--with-salary` и форматов кроме `remote`; зарплата и
+  период поддерживаются. Запрос rabota понимает только обычными словами:
+  `NAME:`, `AND`, `OR` и `NOT` для неё не синтаксис, а мусор.
 
 Повторный сбор обновляет метаданные и число откликов, полный текст и
 вердикты не трогает.
 
 ### `vacancies fetch ID|URL … [--role R] [--refresh]`
 Скачивает полный текст. Принимает голый id (это hh), `площадка:id`
-(`superjob:52295791`) и ссылки hh, zarplata, superjob (любой поддомен). Вакансию, которой нет в базе, добавляет. Уже скачанные
+(`superjob:52295791`, `rabota:54461414`) и ссылки hh, zarplata, superjob,
+rabota (любой поддомен). Вакансию, которой нет в базе, добавляет. Уже скачанные
 пропускает без `--refresh`. `--role` помечает вакансии ролью с
 `query = 'manual'`.
 
@@ -160,15 +165,15 @@ N самых свежих вакансий — так пилотная пачк�
 | Колонка | Смысл |
 |---|---|
 | `id` | суррогатный номер строки в базе; у вакансий hh совпадает с id вакансии hh |
-| `source` | площадка: `hh`, `zarplata` (id общие с hh) или `superjob` |
+| `source` | площадка: `hh`, `zarplata` (id общие с hh), `superjob` или `rabota` |
 | `external_id` | id вакансии на площадке; вместе с `source` — ключ вакансии |
 | `name`, `company`, `company_id` | название, работодатель |
 | `url` | ссылка на страницу вакансии на площадке |
 | `area` | город |
-| `published_at` | дата публикации, ISO 8601; NULL — площадка не отдала (superjob её не отдаёт в выдаче) |
+| `published_at` | дата публикации, ISO 8601; NULL — площадка не отдала (superjob её не отдаёт в выдаче, у rabota она есть и в выдаче, и на странице) |
 | `salary_from`, `salary_to`, `currency` | вилка; NULL — не указана |
 | `gross` | 1 — до вычета налогов, 0 — на руки, NULL — неизвестно |
-| `salary_frequency` | частота выплат: у hh `MONTHLY`, `TWICE_PER_MONTH`, `PER_PROJECT`, у superjob — период оплаты (`MONTH`, `HOUR`) |
+| `salary_frequency` | частота выплат: у hh `MONTHLY`, `TWICE_PER_MONTH`, `PER_PROJECT`, у superjob — период оплаты (`MONTH`, `HOUR`); у rabota не различается, NULL |
 | `experience` | `noExperience`, `between1And3`, `between3And6`, `moreThan6` |
 | `work_formats` | JSON-массив: `REMOTE`, `HYBRID`, `ON_SITE`, `FIELD_WORK` |
 | `employment_form` | `FULL`, `PART`, `PROJECT`, … |
@@ -192,7 +197,7 @@ N самых свежих вакансий — так пилотная пачк�
 `vacancy_id`, `verdict` (`yes` | `no` | `maybe`), `note`, `updated_at`.
 
 ### `seen`, `meta` — состояние планового прохода
-`seen`: `key` (`hh:<id>` или `zarplata:<id>`), `first_seen_at`, `sent_at`
+`seen`: `key` (`hh:<id>`, `zarplata:<id>`, `superjob:<id>` или `rabota:<id>`), `first_seen_at`, `sent_at`
 (NULL — в Telegram не отправлялась). `meta`: `key`, `value` — служебные
 отметки (время последней отправки и т. п.).
 
