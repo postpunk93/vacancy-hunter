@@ -162,3 +162,31 @@ def test_sort_by_score_descending_unscored_last():
     }
     ordered = [v.vacancy_id for v in sort_by_score(vs, scores)]
     assert ordered == ["3", "5", "1", "2", "4", "6"]
+
+
+def test_dedupe_collapses_legal_form_and_quotes():
+    hh = make_vacancy(company="ООО «Ромашка»", name="Редактор", source="hh")
+    sj = make_vacancy(company="Ромашка", name="Редактор", source="superjob")
+
+    groups, absorbed = dedupe([("a", [hh]), ("b", [sj])])
+
+    assert [len(g) for _, g in groups] == [1, 0]
+    assert absorbed == [sj]
+    assert groups[0][1][0].company == "ООО «Ромашка»", "название в базе не переписываем"
+
+
+def test_dedupe_ignores_case_yo_and_punctuation():
+    first = make_vacancy(company="Ромашка и партнёры", name="Контент-редактор", source="hh")
+    second = make_vacancy(company="ромашка и партнеры", name="контент редактор", source="superjob")
+
+    groups, absorbed = dedupe([("a", [first]), ("b", [second])])
+
+    assert [len(g) for _, g in groups] == [1, 0]
+    assert absorbed == [second]
+
+
+def test_dedupe_keeps_different_titles():
+    first = make_vacancy(company="Ромашка", name="Редактор", source="hh")
+    second = make_vacancy(company="Ромашка", name="Копирайтер", source="superjob")
+
+    assert [len(g) for _, g in dedupe([("a", [first]), ("b", [second])])[0]] == [1, 1]

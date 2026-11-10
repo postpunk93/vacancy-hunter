@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -39,6 +40,19 @@ def sort_by_freshness(vacancies: list[Vacancy]) -> list[Vacancy]:
         key=lambda v: (v.published_at is not None, v.published_at or _EPOCH),
         reverse=True,
     )
+
+
+# Организационно-правовые формы, которые не делают вакансию другой.
+_LEGAL_FORMS = frozenset({"ооо", "оао", "зао", "пао", "ао", "ип", "llc", "ltd", "inc"})
+
+_PUNCTUATION = re.compile(r"[«»\"'`.,;:!?()\[\]{}–—-]")
+
+
+def _normalize(text: str) -> str:
+    """Ключ сравнения для дедупа: без регистра, ё, кавычек, пунктуации
+    и организационно-правовой формы. В базе и в выводе остаётся исходное."""
+    text = _PUNCTUATION.sub(" ", (text or "").casefold().replace("ё", "е"))
+    return " ".join(word for word in text.split() if word not in _LEGAL_FORMS)
 
 
 def _merge_areas(areas: list[str]) -> str:
@@ -83,7 +97,7 @@ def dedupe(groups: list[Group]) -> tuple[list[Group], list[Vacancy]]:
                 kept[group_index].append(vacancy)
                 continue
 
-            content_key = (vacancy.company, vacancy.name)
+            content_key = (_normalize(vacancy.company), _normalize(vacancy.name))
             if content_key in seen_content:
                 areas[content_key].append(vacancy.area)
                 absorbed.append(vacancy)
@@ -97,7 +111,7 @@ def dedupe(groups: list[Group]) -> tuple[list[Group], list[Vacancy]]:
     for group_index, (name, _) in enumerate(groups):
         merged = []
         for vacancy in kept[group_index]:
-            city_areas = areas.get((vacancy.company, vacancy.name))
+            city_areas = areas.get((_normalize(vacancy.company), _normalize(vacancy.name)))
             if city_areas and len(city_areas) > 1:
                 vacancy = replace(vacancy, area=_merge_areas(city_areas))
             merged.append(vacancy)
