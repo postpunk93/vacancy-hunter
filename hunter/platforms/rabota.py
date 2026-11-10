@@ -215,6 +215,42 @@ class Rabota:
                 f"({exc.__class__.__name__}: {exc}) — сайт сменил формат"
             ) from exc
 
+    def parse_detail(self, page_html: str) -> Detail:
+        state = _state(page_html)
+        vacancy = ((state.get("rabota") or {}).get("vacancy") or {}).get("vacancy")
+        if not isinstance(vacancy, dict):
+            raise ParseError(
+                "в состоянии rabota нет state.rabota.vacancy.vacancy — сайт сменил формат"
+            )
+        row = card_row(vacancy)
+        remote = (vacancy.get("operating_schedule") or {}).get("id") == REMOTE_SCHEDULE_ID
+        row["work_formats"] = json.dumps(["REMOTE"] if remote else [])
+        return Detail(
+            source="rabota",
+            external_id=row["external_id"],
+            row=row,
+            description=html_to_markdown(vacancy.get("description") or ""),
+            key_skills=[str(skill["name"]) for skill in vacancy.get("skills") or []],
+            status="active" if vacancy.get("status") == "published" else "archived",
+            raw=vacancy,
+        )
+
+    def unsupported(self, query: SearchQuery) -> tuple[str, ...]:
+        """Что из запроса площадка проигнорирует. Молчать об этом нельзя:
+        владелец решит, что фильтр применился."""
+        ignored = []
+        # Регионы у площадки свои (Москва — 3), all_regions умеет только «вся Россия».
+        if query.area != 113:
+            ignored.append("area")
+        if query.only_with_salary:
+            ignored.append("only_with_salary")
+        # Коды опыта свои (0–5): сопоставление с hh-кодами неточное.
+        if query.experience:
+            ignored.append("experience")
+        if query.work_format not in (None, "remote"):
+            ignored.append("work_format")
+        return tuple(ignored)
+
     def vacancy_url(self, external_id: str) -> str:
         return VACANCY_URL.format(id=external_id)
 

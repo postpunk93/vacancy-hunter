@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -5,7 +6,7 @@ import pytest
 
 from hunter.models import SearchQuery
 from hunter.parse import ParseError
-from hunter.platforms import get
+from hunter.platforms import format_ref, get, parse_ref
 from hunter.platforms.base import Captcha
 from hunter.platforms.rabota import card_row
 
@@ -117,3 +118,67 @@ def test_page_without_state_and_captcha_words_is_a_parse_error():
 
 def test_registry_knows_rabota():
     assert get("rabota").name == "rabota"
+
+
+def _nuxt_page(payload: dict) -> str:
+    """Минимальная страница с состоянием: JSON — законный JS-литерал."""
+    state = json.dumps(payload, ensure_ascii=False)
+    return f"<script>window.__NUXT__=(function(a){{return {state};}}({{}}));</script>"
+
+
+def test_vacancy_url_is_canonical():
+    assert get("rabota").vacancy_url("54461414") == (
+        "https://www.rabota.ru/vacancy/54461414/"
+    )
+
+
+def test_detail_carries_full_text_skills_and_remote_format():
+    detail = get("rabota").parse_detail(
+        (FIXTURES / "rabota_vacancy.html").read_text(encoding="utf-8"))
+
+    assert detail.external_id == "54461414"
+    assert detail.description.startswith("Ищем контент-менеджера")
+    assert "<p>" not in detail.description
+    assert detail.key_skills == ["пунктуальность", "коммуникабельность", "грамотность",
+                                 "обучаемость", "корректура текста"]
+    assert detail.status == "active"
+    assert detail.row["work_formats"] == '["REMOTE"]'
+
+
+def test_unpublished_vacancy_is_archived():
+    page = _nuxt_page({"state": {"rabota": {"vacancy": {"vacancy": {
+        "id": 1, "title": "Т", "status": "closed", "description": "<p>текст</p>",
+        "company": {"name": "К"}, "places": [], "skills": []}}}}})
+
+    assert get("rabota").parse_detail(page).status == "archived"
+
+
+def test_captcha_page_on_vacancy_is_recognised():
+    with pytest.raises(Captcha):
+        get("rabota").parse_detail("<html>Подтвердите, что вы не робот</html>")
+
+
+def test_vacancy_page_without_vacancy_node_is_a_parse_error():
+    with pytest.raises(ParseError):
+        get("rabota").parse_detail(_nuxt_page({"state": {"rabota": {"vacancy": {}}}}))
+
+
+def test_ref_forms_are_understood():
+    platform = get("rabota")
+
+    assert platform.parse_ref("https://www.rabota.ru/vacancy/54461414/") == "54461414"
+    assert platform.parse_ref("https://rabota.ru/vacancy/54461414") == "54461414"
+    assert platform.parse_ref("https://hh.ru/vacancy/54461414") is None
+    assert parse_ref("rabota:54461414") == ("rabota", "54461414")
+    assert format_ref("rabota", "54461414") == "rabota:54461414"
+
+
+def test_unsupported_lists_what_the_site_ignores():
+    platform = get("rabota")
+
+    assert platform.unsupported(_query(only_with_salary=False)) == ()
+    ignored = platform.unsupported(_query(
+        area=1, only_with_salary=True,
+        experience=("between1And3",), work_format="hybrid",
+    ))
+    assert set(ignored) == {"area", "only_with_salary", "experience", "work_format"}
