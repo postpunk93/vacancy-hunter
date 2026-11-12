@@ -177,8 +177,13 @@ def test_unscored_cell_is_labelled(corpus):
 
 
 def test_empty_page_keeps_layout_contract(corpus):
-    page = _page(corpus, filters=Filters(q="нет такой вакансии"))
+    _add(corpus, 1, name="Python dev")
+    filters = Filters(q="нет такой вакансии")
+    rows = select_rows(export_rows(corpus, None), filters)
+    assert rows == []
+    page = render_page(rows, filters=filters, threshold=5, total=1)
     assert "Ничего не найдено" in page
+    assert "Показано 0 из 1" in page
     assert 'class="wrap"' in page
     assert 'class="count"' in page
 
