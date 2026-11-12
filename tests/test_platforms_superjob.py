@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -123,8 +124,8 @@ def test_detail_comes_from_jsonld():
     assert detail.status == "active"
 
 
-def test_detail_page_without_jobposting_is_a_parse_error():
-    with pytest.raises(ParseError, match="JobPosting"):
+def test_detail_empty_state_is_a_parse_error():
+    with pytest.raises(ParseError, match="вакансию"):
         get("superjob").parse_detail('<html><script>window.APP_STATE={}</script></html>')
 
 
@@ -168,8 +169,6 @@ def test_hh_does_not_report_unsupported_filters():
 
 
 def _state_page(state):
-    import json
-
     return f"<html><script>window.APP_STATE={json.dumps(state)}</script></html>"
 
 
@@ -200,3 +199,165 @@ def test_broken_card_is_a_parse_error_not_a_key_error():
 
     with pytest.raises(ParseError, match="сменил формат"):
         get("superjob").parse_cards(_state_page(state))
+
+
+def _vacancy_state(*, statuses=None, detail=None, route=True):
+    """Синтетическое состояние страницы вакансии: живая архивная страница
+    в репозиторий не годится — в ней имя частного работодателя."""
+    vid = "900001"
+    state = {
+        "pageInfo": {"pageType": "vacancy-page"},
+        "entities": {
+            "vacancy": {vid: {"id": vid, "relationships": {
+                "companyInfo": {"data": {"id": "c1"}},
+                "town": {"data": {"id": "t1"}},
+                "detailInfo": {"data": {"id": vid}},
+                "requiredExperience": {"data": {"id": "e1"}},
+            }}},
+            "vacancyMainInfo": {vid: {"id": vid, "relationships": {
+                "salary": {"data": {"id": "s1"}},
+            }, "attributes": {
+                "profession": "Редактор",
+                "publishedAt": "2026-11-01T10:00:00+03:00",
+            }}},
+            "vacancyCompanyInfo": {"c1": {"id": "c1", "attributes": {"name": "ООО Ромашка"}}},
+            "town": {"t1": {"id": "t1", "attributes": {"name": "Москва"}}},
+            "vacancyDetailInfo": {vid: {"id": vid, "relationships": {
+                "workType": {"data": {"id": "w1"}},
+                "professionalSkills": {"data": [{"id": "p1"}, {"id": "p2"}]},
+            }, "attributes": {
+                "fullText": "<p>Обязанности</p><ul><li>писать тексты</li></ul>",
+                "fullTextPlain": "Обязанности писать тексты",
+                "isRemoteWork": True,
+                **(detail or {}),
+            }}},
+            "professionalSkill": {
+                "p1": {"id": "p1", "attributes": {"name": "Редактура"}},
+                "p2": {"id": "p2", "attributes": {"name": "Python"}},
+            },
+            "vacancyStatusesInfo": {vid: {"id": vid, "attributes": statuses or {
+                "isArchive": False, "isClosed": False,
+            }}},
+            "vacancyWorkTypeDictionary": {"w1": {"id": "w1", "attributes": {"key": "part-time"}}},
+            "vacancyExperienceDictionary": {"e1": {"id": "e1", "attributes": {"value": 2}}},
+            "vacancySalary": {"s1": {"id": "s1", "relationships": {
+                "currency": {"data": {"id": "cur1"}},
+                "salaryPeriod": {"data": {"id": "per1"}},
+                "salaryType": {"data": {"id": "st1"}},
+            }, "attributes": {"minSalary": 50000, "maxSalary": 70000}}},
+            "currencyDictionary": {"cur1": {"id": "cur1", "attributes": {"key": "rub"}}},
+            "vacancyPaymentPeriodDictionary": {"per1": {"id": "per1", "attributes": {"key": "month"}}},
+            "vacancySalaryTypeDictionary": {"st1": {"id": "st1", "attributes": {"key": "gross"}}},
+        },
+    }
+    if route:
+        state["pageInfo"]["routeParams"] = {"vacancyId": vid}
+    return state
+
+
+def _posting(**over):
+    posting = {
+        "@type": "JobPosting",
+        "url": "https://russia.superjob.ru/vakansii/x-900001.html",
+        "title": "Редактор",
+        "description": "<p>Текст вакансии</p>",
+        "datePosted": "2026-11-01",
+        "employmentType": "FULL_TIME",
+        "baseSalary": {"currency": "RUB",
+                       "value": {"minValue": 50000, "maxValue": 0, "unitText": "MONTH"}},
+        "jobLocation": {"address": {"addressLocality": "Москва"}},
+        "hiringOrganization": {"name": "ООО Ромашка"},
+    }
+    posting.update(over)
+    return posting
+
+
+def _detail_html(state=None, posting=None):
+    state_script = (f"<script>window.APP_STATE={json.dumps(state)}</script>"
+                    if state is not None else "")
+    posting_script = (f'<script type="application/ld+json">{json.dumps(posting)}</script>'
+                      if posting is not None else "")
+    return f"<html>{state_script}{posting_script}</html>"
+
+
+@pytest.mark.parametrize("employment, expected", [
+    ("FULL_TIME", "FULL"),
+    (["FULL_TIME", "PART_TIME", "TEMPORARY"], "FULL"),
+    (["INTERN", "FULL_TIME"], "PROBATION"),
+    (["VOLUNTEER"], "VOLUNTEER"),
+    ("VOLUNTEER", "VOLUNTEER"),
+    (None, None),
+])
+def test_detail_employment_type_may_be_a_list(employment, expected):
+    html = _detail_html(_vacancy_state(), _posting(employmentType=employment))
+
+    assert get("superjob").parse_detail(html).row["employment_form"] == expected
+
+
+def test_archived_detail_without_jobposting_comes_from_state():
+    state = _vacancy_state(statuses={"isArchive": True, "isClosed": False})
+
+    detail = get("superjob").parse_detail(_detail_html(state))
+
+    assert detail.source == "superjob" and detail.external_id == "900001"
+    assert detail.status == "archived"
+    assert detail.row["name"] == "Редактор"
+    assert detail.row["company"] == "ООО Ромашка"
+    assert detail.row["published_at"] == "2026-11-01T10:00:00+03:00"
+    assert detail.row["area"] == "Москва"
+    assert detail.row["salary_from"] == 50000
+    assert detail.row["salary_to"] == 70000
+    assert detail.row["currency"] == "RUR"
+    assert detail.row["employment_form"] == "PART"
+    assert json.loads(detail.row["work_formats"]) == ["REMOTE"]
+    assert detail.key_skills == ["Редактура", "Python"]
+    assert "Обязанности" in detail.description and "<p>" not in detail.description
+
+
+def test_closed_detail_is_archived_too():
+    state = _vacancy_state(statuses={"isArchive": False, "isClosed": True})
+
+    assert get("superjob").parse_detail(_detail_html(state)).status == "archived"
+
+
+def test_detail_falls_back_to_full_text_plain():
+    detail = get("superjob").parse_detail(
+        _detail_html(_vacancy_state(detail={"fullText": ""}))
+    )
+
+    assert detail.description.strip() == "Обязанности писать тексты"
+
+
+def test_detail_falls_back_to_duties_and_requirements():
+    state = _vacancy_state(detail={
+        "fullText": "", "fullTextPlain": "",
+        "duties": "<p>Писать тексты</p>", "requirements": "<p>Знать язык</p>",
+    })
+
+    detail = get("superjob").parse_detail(_detail_html(state))
+
+    assert "Писать тексты" in detail.description
+    assert "Знать язык" in detail.description
+
+
+def test_detail_state_without_route_vacancy_id_is_a_parse_error():
+    state = _vacancy_state(route=False)
+
+    with pytest.raises(ParseError, match="vacancyId"):
+        get("superjob").parse_detail(_detail_html(state))
+
+
+def test_detail_state_of_another_page_type_is_a_parse_error():
+    state = _vacancy_state()
+    state["pageInfo"]["pageType"] = "search-vacancy"
+
+    with pytest.raises(ParseError, match="вакансию"):
+        get("superjob").parse_detail(_detail_html(state))
+
+
+def test_detail_state_without_vacancy_entities_is_a_parse_error():
+    state = _vacancy_state()
+    del state["entities"]["vacancyMainInfo"]
+
+    with pytest.raises(ParseError, match="сущности"):
+        get("superjob").parse_detail(_detail_html(state))

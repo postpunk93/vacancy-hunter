@@ -1,4 +1,9 @@
-"""superjob.ru: выдача отдаётся состоянием `window.APP_STATE`, страница вакансии — JSON-LD.
+"""superjob.ru: и выдача, и страница вакансии отдаются состоянием `window.APP_STATE`.
+
+У опубликованных вакансий на странице есть ещё JSON-LD JobPosting — метаданные
+берём из него. У архивных страниц JobPosting нет, и деталь собирается из того же
+состояния, что и карточки выдачи: разбор страницы не должен зависеть от того,
+снята вакансия с сайта или нет.
 
 Выдача — это SSR-страница с нормализованным стором (entities + responses).
 Узкие запросы площадка уводит на SEO-лендинг: он тоже содержит сорок карточек,
@@ -30,6 +35,7 @@ REMOTE_TAG = "81"
 _STATE_MARKER = "window.APP_STATE="
 _CARD_MARKER = "f-test-vacancy-item"
 _CARD_PAGE = "search-vacancy"
+_DETAIL_PAGE = "vacancy-page"
 
 # Код опыта в справочнике superjob → код hh: остальной код ждёт hh-словарь.
 _EXPERIENCE = {
@@ -51,11 +57,27 @@ _EMPLOYMENT = {
     "INTERN": "PROBATION",
 }
 
+# Занятость в справочнике страницы вакансии — слаг, а JSON-LD отдаёт код hh.
+_WORK_TYPE = {"full-time": "FULL", "part-time": "PART"}
+
 _VACANCY_PATH = re.compile(r"/vakansii/(?:[^/]*-)?(\d+)\.html")
 _JOB_POSTING = re.compile(
     r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
     re.DOTALL,
 )
+
+
+def _employment(value: object) -> str | None:
+    """employmentType → код hh. Схема schema.org разрешает список, площадка им пользуется."""
+    if isinstance(value, list):
+        known = [_EMPLOYMENT[code] for code in value if code in _EMPLOYMENT]
+        if known:
+            return known[0]
+        first = next((code for code in value if isinstance(code, str)), None)
+        return _EMPLOYMENT.get(first, first) if first else None
+    if isinstance(value, str):
+        return _EMPLOYMENT.get(value, value)
+    return None
 
 
 def _state(page_html: str) -> dict:
@@ -160,6 +182,8 @@ def _card(state: dict, vacancy_id: str) -> Card:
             state, "vacancyWorkTypeDictionary",
             (_relation(_entity(state, "vacancyDetailInfo", detail_link["id"]), "workType") or {}).get("id"),
         )
+    if work_type:
+        work_type = _WORK_TYPE.get(work_type, work_type)
 
     salary = _salary(state, vacancy)
     name = (main.get("attributes") or {}).get("profession") or UNKNOWN_VACANCY_NAME
@@ -214,8 +238,8 @@ def _card(state: dict, vacancy_id: str) -> Card:
     )
 
 
-def _job_posting(page_html: str) -> dict:
-    """JSON-LD JobPosting со страницы вакансии."""
+def _find_job_posting(page_html: str) -> dict | None:
+    """JSON-LD JobPosting со страницы вакансии. У архивных страниц его нет."""
     for block in _JOB_POSTING.findall(page_html):
         try:
             data = json.loads(block)
@@ -223,9 +247,78 @@ def _job_posting(page_html: str) -> dict:
             continue
         if isinstance(data, dict) and data.get("@type") == "JobPosting":
             return data
-    if _STATE_MARKER not in page_html:
-        raise Captcha("в ответе superjob нет ни JobPosting, ни APP_STATE — похоже на капчу")
-    raise ParseError("на странице superjob нет JobPosting — сайт сменил формат")
+    return None
+
+
+def _detail_vacancy_id(state: dict) -> str:
+    page_info = state.get("pageInfo") or {}
+    page_type = page_info.get("pageType")
+    if page_type != _DETAIL_PAGE:
+        raise ParseError(
+            f"страница superjob отдала не вакансию ({page_type}) — сайт сменил формат"
+        )
+    vacancy_id = (page_info.get("routeParams") or {}).get("vacancyId")
+    if not vacancy_id:
+        raise ParseError("в APP_STATE нет routeParams.vacancyId — сайт сменил формат")
+    return str(vacancy_id)
+
+
+def _detail_status(state: dict, vacancy_id: str) -> str:
+    """Снята с сайта или жива. Нет сведений о статусе — считаем живой."""
+    info = ((state.get("entities") or {}).get("vacancyStatusesInfo") or {}).get(vacancy_id) or {}
+    attributes = info.get("attributes") or {}
+    if attributes.get("isArchive") or attributes.get("isClosed"):
+        return "archived"
+    return "active"
+
+
+def _detail_entity(state: dict, vacancy_id: str) -> dict:
+    link = _relation(_entity(state, "vacancy", vacancy_id), "detailInfo")
+    if link is None:
+        return {}
+    return _entity(state, "vacancyDetailInfo", link["id"], vacancy_id)
+
+
+def _detail_text(attributes: dict) -> str:
+    for key in ("fullText", "fullTextPlain"):
+        text = attributes.get(key)
+        if text and text.strip():
+            return text
+    parts = [attributes.get("duties"), attributes.get("requirements")]
+    return "\n\n".join(part for part in parts if part)
+
+
+def _detail_skills(state: dict, vacancy_id: str) -> list[str]:
+    links = (_detail_entity(state, vacancy_id).get("relationships") or {}).get(
+        "professionalSkills", {}).get("data") or []
+    entities = (state.get("entities") or {}).get("professionalSkill") or {}
+    names = []
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        name = ((entities.get(str(link.get("id"))) or {}).get("attributes") or {}).get("name")
+        if name:
+            names.append(name)
+    return names
+
+
+def _detail_from_state(state: dict, vacancy_id: str, status: str) -> Detail:
+    """Архивная страница: JobPosting нет, но состояние страницы полное."""
+    card = _card(state, vacancy_id)
+    attributes = _detail_entity(state, vacancy_id).get("attributes") or {}
+    main = _entity(state, "vacancyMainInfo", vacancy_id, vacancy_id).get("attributes") or {}
+    row = dict(card.row)
+    # Даты публикации в карточке выдачи нет — берём из состояния.
+    row["published_at"] = main.get("publishedAt")
+    return Detail(
+        source="superjob",
+        external_id=str(vacancy_id),
+        row=row,
+        description=html_to_markdown(_detail_text(attributes)),
+        key_skills=_detail_skills(state, vacancy_id),
+        status=status,
+        raw=attributes,
+    )
 
 
 class Superjob:
@@ -278,7 +371,12 @@ class Superjob:
         return VACANCY_URL.format(id=external_id)
 
     def parse_detail(self, page_html: str) -> Detail:
-        posting = _job_posting(page_html)
+        state = _state(page_html)
+        vacancy_id = _detail_vacancy_id(state)
+        status = _detail_status(state, vacancy_id)
+        posting = _find_job_posting(page_html)
+        if posting is None:
+            return _detail_from_state(state, vacancy_id, status)
         url = posting.get("url") or ""
         external_id = self.parse_ref(url)
         if external_id is None:
@@ -310,7 +408,7 @@ class Superjob:
             "salary_frequency": value.get("unitText"),
             "experience": None,
             "work_formats": json.dumps([]),
-            "employment_form": _EMPLOYMENT.get(employment, employment),
+            "employment_form": _employment(employment),
             "employer_trusted": None,
             "employer_category": None,
             "antifraud_power": None,
@@ -324,7 +422,7 @@ class Superjob:
             description=html_to_markdown(posting.get("description") or ""),
             # Ключевых навыков на странице superjob нет.
             key_skills=[],
-            status="active",
+            status=status,
             raw=posting,
         )
 
