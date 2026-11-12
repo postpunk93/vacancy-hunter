@@ -397,9 +397,11 @@ def test_detail_with_jobposting_survives_without_state():
 
 
 def test_card_employment_form_is_hh_code():
-    cards = _cards("superjob_search_sales.html")
+    cards = {card.external_id: card.row["employment_form"]
+             for card in _cards("superjob_search_sales.html")}
 
-    assert cards[0].row["employment_form"] == "FULL"
+    assert cards["52295791"] == "FULL"
+    assert cards["52303218"] == "PART", "half-day — тоже неполная занятость"
 
 
 def test_detail_rows_have_the_same_keys_on_both_paths():

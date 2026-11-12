@@ -61,7 +61,11 @@ superjob этим пользуется:
    незнакомого кода). Не строка и не список → `None`. Порядок списка уважаем:
    площадка ставит основную занятость первой.
 
-2. **`parse_detail` читает `APP_STATE` всегда.** Состояние даёт:
+2. **`parse_detail` сначала ищет `JobPosting`, а состояние читает, если оно есть.**
+   Страница с `JobPosting` разбирается и без `APP_STATE`: пропавшее состояние
+   не должно выглядеть капчей и обрывать докачку остальных вакансий. Когда
+   состояние есть, из него берётся статус, когда нет — `active`.
+   Состояние даёт:
    - `pageInfo.routeParams.vacancyId` — id вакансии;
    - `vacancyStatusesInfo` — `archived`, если `isArchive` или `isClosed`, иначе `active`;
    - `vacancyDetailInfo.attributes` — текст для запасного пути.
@@ -69,22 +73,28 @@ superjob этим пользуется:
 3. **Запасной путь, если `JobPosting` нет.** Строка вакансии берётся из
    `_card(state, vacancy_id)` — тот же разбор, что для выдачи. Дополнительно:
    - `published_at` ← `vacancyMainInfo.attributes.publishedAt` (в выдаче даты нет);
-   - описание ← `vacancyDetailInfo.attributes.fullText`, если пусто —
-     `fullTextPlain`, если пусто — `duties` + `requirements`;
+   - описание ← `vacancyDetailInfo.attributes.fullText` (это HTML, идёт через
+     `html_to_markdown`), если пусто — `fullTextPlain`, если пусто —
+     `duties` + `requirements` (оба поля — плоский текст с переводами строк,
+     их через конвертер не прогоняем, иначе строки схлопнутся);
    - `key_skills` ← имена из `professionalSkill` по
      `vacancyDetailInfo.relationships.professionalSkills.data`.
-   Описание прогоняется через `html_to_markdown`, как и в пути с `JobPosting`.
 
 4. **`_card` переводит `workType` в код hh.** Справочник отдаёт слаги
-   (`full-time`, `part-time`), а путь с `JobPosting` — коды (`FULL`, `PART`).
-   Новая карта `_WORK_TYPE = {"full-time": "FULL", "part-time": "PART"}`
+   (`full-time`, `part-time`, `half-day`), а путь с `JobPosting` — коды
+   (`FULL`, `PART`). Новая карта
+   `_WORK_TYPE = {"full-time": "FULL", "part-time": "PART", "half-day": "PART"}`
    выравнивает площадку: сейчас в базе у superjob лежат слаги, а рядом коды hh.
    Незнакомый слаг остаётся как есть.
 
-5. **Ошибки.** Нет `APP_STATE` → `Captcha` (как раньше). Состояние есть, но
-   `pageType` не `vacancy-page` или нет `routeParams.vacancyId` → `ParseError`
-   с честным текстом. Нет ни `JobPosting`, ни сущностей вакансии в состоянии →
-   `ParseError`, а не падение `KeyError`.
+5. **Ошибки.** Нет ни `JobPosting`, ни `APP_STATE` → `Captcha` (как раньше).
+   Состояние есть, но `pageType` не `vacancy-page` или нет
+   `routeParams.vacancyId` → `ParseError` с честным текстом. Нет ни `JobPosting`,
+   ни сущностей вакансии в состоянии → `ParseError`, а не падение `KeyError`.
+   Нет `vacancyStatusesInfo` → `ParseError`: молчаливое «жива» перезаписало бы
+   `archived` на `active` у всех размеченных строк. Текста нет ни в одном из
+   четырёх полей → `ParseError`: иначе пустое описание запишется как скачанная
+   деталь и вакансия больше не перекачается.
 
 ## Чего не делаем
 
