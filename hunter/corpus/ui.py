@@ -309,8 +309,8 @@ def _flags_text(raw) -> str:
 def _score_cell(score, threshold: int) -> str:
     if score is None:
         return (
-            '<td class="score none"><span aria-hidden="true">—</span>'
-            '<span class="sr-only">без оценки</span></td>'
+            '<td class="score none" aria-label="без оценки">'
+            '<span aria-hidden="true">—</span></td>'
         )
     if score >= threshold:
         kind = "good"

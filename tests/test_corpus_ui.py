@@ -166,7 +166,21 @@ def test_score_class_follows_threshold(corpus):
     assert 'class="score good">8' in page
     assert 'class="score near">4' in page
     assert 'class="score low">2' in page
-    assert 'class="score none"><span aria-hidden="true">—</span>' in page
+    assert 'class="score none" aria-label="без оценки"><span aria-hidden="true">—</span>' in page
+
+
+def test_unscored_cell_is_labelled(corpus):
+    _add(corpus, 1)
+    page = _page(corpus)
+    assert 'aria-label="без оценки"' in page
+    assert '<span class="sr-only">без оценки</span>' not in page
+
+
+def test_empty_page_keeps_layout_contract(corpus):
+    page = _page(corpus, filters=Filters(q="нет такой вакансии"))
+    assert "Ничего не найдено" in page
+    assert 'class="wrap"' in page
+    assert 'class="count"' in page
 
 
 def test_page_keeps_filters_in_form_and_row_back(corpus):
