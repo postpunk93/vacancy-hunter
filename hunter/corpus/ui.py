@@ -142,16 +142,16 @@ def select_rows(rows: list[sqlite3.Row], filters: Filters) -> list[sqlite3.Row]:
 _STYLE = """
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 24px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2328; background: #f6f7f9; }
-h1 { margin: 0 0 16px; font-size: 20px; }
+body { margin: 0; padding: 24px; height: 100vh; display: flex; flex-direction: column; overflow: auto; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2328; background: #f6f7f9; }
+h1 { flex: none; margin: 0 0 16px; font-size: 20px; }
 :focus-visible { outline: 2px solid #0969da; outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; padding: 12px; background: #fff; border: 1px solid #d8dee4; border-radius: 8px; }
+.filters { flex: none; display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 16px; padding: 12px; background: #fff; border: 1px solid #d8dee4; border-radius: 8px; }
 .filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #57606a; }
 .filters input, .filters select { padding: 5px 8px; font: inherit; color: inherit; background: #fff; border: 1px solid #d0d7de; border-radius: 6px; }
 .filters button { padding: 6px 14px; font: inherit; cursor: pointer; background: #1f6feb; color: #fff; border: 1px solid #1f6feb; border-radius: 6px; }
 .filters a { align-self: center; font-size: 12px; color: #0969da; }
-.wrap { max-height: calc(100vh - 200px); overflow: auto; background: #fff; border: 1px solid #d8dee4; border-radius: 8px; }
+.wrap { flex: 1 1 auto; min-height: 240px; position: relative; overflow: auto; background: #fff; border: 1px solid #d8dee4; border-radius: 8px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 7px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid #eaeef2; }
 th { position: sticky; top: 0; z-index: 1; font-size: 12px; white-space: nowrap; background: #f6f8fa; }
@@ -179,7 +179,7 @@ td.note button { padding: 3px 10px; font: inherit; cursor: pointer; border: 1px 
 td.note button.busy { cursor: progress; opacity: .6; }
 .flash { font-size: 12px; color: #1a7f37; }
 .flash.error { color: #cf222e; }
-.count { margin-top: 12px; color: #57606a; }
+.count { flex: none; margin-top: 12px; color: #57606a; }
 """
 
 _SCRIPT = """
