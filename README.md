@@ -123,8 +123,6 @@ TG_CHAT_ID=ваш chat_id
 проблемная страница сохраняется в `me/debug/`, а `tests/test_parse.py`
 покажет, когда парсер снова в порядке.
 
-Отложенные решения — в [`docs/backlog.md`](docs/backlog.md).
-
 ## Тесты
 
 ```bash
