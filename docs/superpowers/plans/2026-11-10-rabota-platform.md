@@ -43,7 +43,7 @@
 
 Рабочий прототип разбора, проверенный на живых страницах: `/tmp/opencode/nuxt_probe.py` (функция `state`). Логику берём оттуда, оформление — под проект: класс-парсер с позицией, `ParseError` вместо `ValueError`/`assert`.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 ```python
 import pytest
@@ -111,12 +111,12 @@ def test_broken_payload_reports_position():
         parse_nuxt(page("return {a: };"))
 ```
 
-- [ ] **Step 2: Убедиться, что тесты падают**
+- [x] **Step 2: Убедиться, что тесты падают**
 
 Run: `uv run pytest tests/test_platforms_nuxt.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'hunter.platforms.nuxt'`
 
-- [ ] **Step 3: Реализовать `parse_nuxt` в `hunter/platforms/nuxt.py`**
+- [x] **Step 3: Реализовать `parse_nuxt` в `hunter/platforms/nuxt.py`**
 
 Шаги разбора:
 
@@ -129,12 +129,12 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'hunter.platforms.nuxt'
 7. Парсер значений — рекурсивный спуск: объекты с неквотированными ключами, массивы, строки в `'`/`"` с `\uXXXX` и `\n\t\r\b\f`, числа (int/float, отрицательные), `true`/`false`/`null`/`void 0`/`!0`/`!1`, одиночный идентификатор → значение параметра (`None`, если параметра нет). Пробелы и переводы строк между элементами — пропускать.
 8. Любой непонятный символ — `ParseError` с позицией и куском текста: `f"{marker} не разобрался на позиции {pos}: {snippet!r}"`.
 
-- [ ] **Step 4: Убедиться, что тесты проходят**
+- [x] **Step 4: Убедиться, что тесты проходят**
 
 Run: `uv run pytest tests/test_platforms_nuxt.py -v`
 Expected: PASS, 7 passed
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add hunter/platforms/nuxt.py tests/test_platforms_nuxt.py
@@ -171,7 +171,7 @@ curl -sS --compressed 'https://www.rabota.ru/vacancy/?query=zzzzzzzzzz&all_regio
 curl -sS --compressed 'https://www.rabota.ru/vacancy/54461414/' -o tests/fixtures/rabota_vacancy.html
 ```
 
-- [ ] **Step 1: Написать падающие тесты выдачи**
+- [x] **Step 1: Написать падающие тесты выдачи**
 
 ```python
 from datetime import datetime, timedelta, timezone
@@ -295,12 +295,12 @@ def test_registry_knows_rabota():
     assert get("rabota").name == "rabota"
 ```
 
-- [ ] **Step 2: Убедиться, что тесты падают**
+- [x] **Step 2: Убедиться, что тесты падают**
 
 Run: `uv run pytest tests/test_platforms_rabota.py -v`
 Expected: FAIL — `KeyError: 'rabota'` (и `ImportError` на `hunter.platforms.rabota`)
 
-- [ ] **Step 3: Реализовать константы, `_state`, `_salary`, `card_row`, `_card`, `Rabota` и зарегистрировать площадку**
+- [x] **Step 3: Реализовать константы, `_state`, `_salary`, `card_row`, `_card`, `Rabota` и зарегистрировать площадку**
 
 `hunter/platforms/rabota.py`:
 
@@ -325,12 +325,12 @@ _CAPTCHA_MARKERS = ("captcha", "капча", "робот", "подтвердит
 
 `hunter/platforms/__init__.py`: докстринг → `«Площадки поиска работы: hh (он же zarplata), superjob и rabota.»`, импорт `Rabota`, `"rabota": Rabota()` в `PLATFORMS`.
 
-- [ ] **Step 4: Убедиться, что тесты проходят**
+- [x] **Step 4: Убедиться, что тесты проходят**
 
 Run: `uv run pytest tests/test_platforms_rabota.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add hunter/platforms/rabota.py hunter/platforms/__init__.py tests/test_platforms_rabota.py tests/fixtures/rabota_search_editor.html tests/fixtures/rabota_search_empty.html
@@ -348,7 +348,7 @@ git commit -m "feat: площадка rabota — карточки из выда�
 **Interfaces:**
 - Produces: `Rabota.parse_detail(page_html) -> Detail`, `Rabota.parse_ref(ref) -> str | None`, `Rabota.unsupported(query) -> tuple[str, ...]`.
 
-- [ ] **Step 1: Дописать падающие тесты**
+- [x] **Step 1: Дописать падающие тесты**
 
 ```python
 import json
@@ -420,23 +420,23 @@ def test_unsupported_lists_what_the_site_ignores():
     assert set(ignored) == {"area", "only_with_salary", "experience", "work_format"}
 ```
 
-- [ ] **Step 2: Убедиться, что тесты падают**
+- [x] **Step 2: Убедиться, что тесты падают**
 
 Run: `uv run pytest tests/test_platforms_rabota.py -v`
 Expected: FAIL — у `Rabota` нет `parse_detail`/`parse_ref`/`unsupported`
 
-- [ ] **Step 3: Реализовать три метода**
+- [x] **Step 3: Реализовать три метода**
 
 - `parse_detail`: `state = _state(page_html)`; `vacancy = state.get("rabota", {}).get("vacancy", {}).get("vacancy"`; не словарь → `ParseError("в состоянии rabota нет state.rabota.vacancy.vacancy — сайт сменил формат")`. `row = card_row(vacancy)`, но с `work_formats = json.dumps(["REMOTE"] if (vacancy.get("operating_schedule") or {}).get("id") == REMOTE_SCHEDULE_ID else [])`. `Detail(description=html_to_markdown(vacancy.get("description") or ""), key_skills=[str(skill["name"]) for skill in vacancy.get("skills") or []], status="active" if vacancy.get("status") == "published" else "archived", raw=vacancy)`.
 - `parse_ref`: `urlparse`, хост `rabota.ru` или поддомен; путь строго `/vacancy/<цифры>/` → id, иначе `None`.
 - `unsupported`: `area` при `query.area != 113`; `only_with_salary` при `True`; `experience` при непустом; `work_format` при значении вне `(None, "remote")`. Зарплата и период поддерживаются — их не перечислять.
 
-- [ ] **Step 4: Убедиться, что тесты проходят**
+- [x] **Step 4: Убедиться, что тесты проходят**
 
 Run: `uv run pytest tests/test_platforms_rabota.py tests/test_platforms_nuxt.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add hunter/platforms/rabota.py tests/test_platforms_rabota.py tests/fixtures/rabota_vacancy.html
@@ -455,7 +455,7 @@ git commit -m "feat: площадка rabota — страница ваканси
 - Consumes: `Captcha` из `hunter.platforms`.
 - Produces: `_collect` считает источник заблокированным при `Captcha`, так же как при `Blocked`; `run_pass` возвращает `EXIT_BLOCKED` (3).
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 ```python
 def test_captcha_blocks_the_pass_instead_of_crashing_it():
@@ -476,21 +476,21 @@ def test_captcha_blocks_the_pass_instead_of_crashing_it():
     assert "rabota" in text and "заблокировал" in text
 ```
 
-- [ ] **Step 2: Убедиться, что тест падает**
+- [x] **Step 2: Убедиться, что тест падает**
 
 Run: `uv run pytest tests/test_run.py::test_captcha_blocks_the_pass_instead_of_crashing_it -v`
 Expected: FAIL — код `4` вместо `3` (`main`-овский `except Exception` тут ни при чём: `run_pass` не ловит `Captcha` и он уходит наружу как исключение — тест упадёт с `Captcha`)
 
-- [ ] **Step 3: Ловить `Captcha` вместе с `Blocked`**
+- [x] **Step 3: Ловить `Captcha` вместе с `Blocked`**
 
 В `hunter/run.py`: `from .platforms import Captcha, get`; в `_collect` заменить `except Blocked as exc:` на `except (Blocked, Captcha) as exc:`. Тело ветки не меняется: `blocked_sources.add(source)`, предупреждение `f"{source} заблокировал запросы: {exc}"`, `break`. Слова «заблокировал» для капчи — сознательно: для владельца это одно и то же событие «площадка не пустила».
 
-- [ ] **Step 4: Убедиться, что тесты проходят**
+- [x] **Step 4: Убедиться, что тесты проходят**
 
 Run: `uv run pytest tests/test_run.py -v`
 Expected: PASS, включая прежние тесты блокировок
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add hunter/run.py tests/test_run.py
@@ -509,7 +509,7 @@ git commit -m "fix: капча площадки завершает проход 
 - Consumes: `Detail.row["work_formats"]` — JSON-строка, как её кладут все площадки (`hh`, `superjob`, `rabota`).
 - Produces: `update_detail` перезаписывает `vacancies.work_formats`, только если список из детали непустой; сигнатура не меняется.
 
-- [ ] **Step 1: Написать падающие тесты**
+- [x] **Step 1: Написать падающие тесты**
 
 ```python
 def test_update_detail_writes_work_formats_from_the_vacancy_page(corpus):
@@ -533,21 +533,21 @@ def test_update_detail_does_not_erase_known_formats_with_an_empty_list(corpus):
 
 (в шапку файла добавить `import json`; `make_detail` по умолчанию несёт `work_formats: ["REMOTE"]`)
 
-- [ ] **Step 2: Убедиться, что тесты падают**
+- [x] **Step 2: Убедиться, что тесты падают**
 
 Run: `uv run pytest tests/test_corpus_store.py -k update_detail -v`
 Expected: FAIL — первый тест видит `[]` вместо `["REMOTE"]`
 
-- [ ] **Step 3: Дописать `work_formats` в `UPDATE`**
+- [x] **Step 3: Дописать `work_formats` в `UPDATE`**
 
 В `update_detail` разобрать `json.loads(detail.row.get("work_formats") or "[]")`; если список непустой — `UPDATE` дополнительно пишет `work_formats` (JSON-строка исходная, не пересобранная); пустой — прежний `UPDATE` без этой колонки, чтобы не затирать то, что уже известно.
 
-- [ ] **Step 4: Убедиться, что тесты проходят**
+- [x] **Step 4: Убедиться, что тесты проходят**
 
 Run: `uv run pytest tests/test_corpus_store.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add hunter/corpus/store.py tests/test_corpus_store.py
@@ -567,7 +567,7 @@ git commit -m "fix: формат работы со страницы ваканс
 **Interfaces:**
 - Produces: документация и рабочая настройка, при которой rabota получает обычные слова, а не hh-синтаксис.
 
-- [ ] **Step 1: Обновить `hunter/corpus/GUIDE.md`**
+- [x] **Step 1: Обновить `hunter/corpus/GUIDE.md`**
 
 - Строка 40: добавить, что `--source rabota` идёт на rabota.ru.
 - Список `--source` (52): `hh | zarplata | superjob | rabota`; отдельным предложением: у rabota нет `--area` (кроме 113), `--experience` и `--with-salary`, форматов кроме `remote`; зарплата и период поддерживаются; запрос — только обычные слова, hh-синтаксис площадка не понимает.
@@ -575,15 +575,15 @@ git commit -m "fix: формат работы со страницы ваканс
 - Таблица схемы: `source` — добавить `rabota`; `published_at` — rabota отдаёт дату публикации в выдаче; `salary_frequency` — у rabota не различается, остаётся NULL.
 - Строка 195: ключи `seen` — `hh:<id>`, `zarplata:<id>`, `superjob:<id>` или `rabota:<id>`.
 
-- [ ] **Step 2: Обновить `config.example.yaml`**
+- [x] **Step 2: Обновить `config.example.yaml`**
 
 Комментарий у `sources`: `# hh, zarplata, superjob, rabota`.
 
-- [ ] **Step 3: Поправить подсказки `collect` в `hunter/corpus/cli.py`**
+- [x] **Step 3: Поправить подсказки `collect` в `hunter/corpus/cli.py`**
 
 Строка 400 — `«собрать карточки из выдачи площадки под роль»`; `--text` (404) — `«поисковый запрос: hh понимает AND, OR, NOT и NAME:, остальные площадки — только обычные слова»`; `--pages` (407) — `f"страниц выдачи, от 1 до {MAX_PAGES}"` (без «по 50»: у площадок разный размер страницы).
 
-- [ ] **Step 4: Настроить `me/config.yaml`**
+- [x] **Step 4: Настроить `me/config.yaml`**
 
 `sources: [hh, superjob, rabota]`.
 
@@ -600,7 +600,7 @@ git commit -m "fix: формат работы со страницы ваканс
 | Продвижение: SMM и реклама | `null` | `SMM менеджер` |
 | Продвижение — удалёнка в тексте | `продвижение сайта удаленно` | `SMM менеджер удаленно` |
 
-- [ ] **Step 5: Проверить, что конфиг читается**
+- [x] **Step 5: Проверить, что конфиг читается**
 
 Run:
 
@@ -616,7 +616,7 @@ for q in c.queries:
 
 Expected: `sources: ('hh', 'superjob', 'rabota')`; у каждого запроса `rabota:` — обычные слова без `NAME:`, `AND`, `OR`, `NOT`
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add hunter/corpus/GUIDE.md hunter/corpus/cli.py config.example.yaml
@@ -629,17 +629,17 @@ git commit -m "docs: rabota в справочнике, подсказках и �
 
 **Files:** нет изменений кода.
 
-- [ ] **Step 1: Полный набор тестов**
+- [x] **Step 1: Полный набор тестов**
 
 Run: `uv run pytest`
 Expected: зелёный, без сети
 
-- [ ] **Step 2: Живой проход без записи в базу и без оценки**
+- [x] **Step 2: Живой проход без записи в базу и без оценки**
 
 Run: `uv run hunter --days 7 --dry-run --no-score`
 Expected: код выхода 0, в сводке есть блоки с rabota и карточки, нет предупреждений о смене формата и нет «похоже на капчу»
 
-- [ ] **Step 3: Сбор в базу по площадке**
+- [x] **Step 3: Сбор в базу по площадке**
 
 Run: `uv run vacancies collect --source rabota --role author --text "редактор копирайтер" --days 7`
 Expected: карточки записаны, отчёт без ОШИБКИ и без блокировки. Дальше проверить текст:
@@ -652,6 +652,6 @@ uv run vacancies sql "SELECT length(description), key_skills, work_formats FROM 
 
 Expected: `description` длиннее тысячи символов, `key_skills` — непустой JSON-список, `work_formats` — `["REMOTE"]`
 
-- [ ] **Step 4: Сообщить владельцу результат**
+- [x] **Step 4: Сообщить владельцу результат**
 
 Коротко: сколько карточек дала rabota на живом проходе, какие предупреждения были, все ли тесты зелёные. Затем — отдельный субагент `reviewer` по всей ветке (правило проекта).

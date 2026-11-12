@@ -108,9 +108,11 @@ https://www.rabota.ru/vacancy/?query=<text>&all_regions=1&period=<период>
 `is_ad = False` всегда: `is_promoted` — платное продвижение вакансии,
 а не реклама, и `drop_ads` не должен её выкидывать.
 
-`parse_detail`: `state.rabota.vacancy.vacancy` (+`vacancyCache`, если
-основного узла нет). Описание — `html_to_markdown(description)`,
-`key_skills` — имена из `skills`, `status` — `active` при `status ==
+`parse_detail`: `state.rabota.vacancy.vacancy`; нет узла — `ParseError`.
+Фолбэк на `vacancyCache` не делаем: на живой странице узел равен `null`,
+структура не проверена. Описание — `html_to_markdown(description)`;
+пустой текст — `ParseError`, иначе вакансия запишется как скачанная и
+больше не перекачается. `key_skills` — имена из `skills`, `status` — `active` при `status ==
 "published"`, иначе `archived`. `work_formats` — `("REMOTE",)` при
 `operating_schedule.id == 6` (в карточке этого нет, поэтому в дайджесте
 у rabota формата не будет).
@@ -206,5 +208,5 @@ https://www.rabota.ru/vacancy/?query=<text>&all_regions=1&period=<период>
 - Живой проход без записи в базу и без оценки:
   `hunter --days 7 --dry-run --no-score` — код выхода 0, rabota даёт
   карточки, предупреждений о смене формата нет.
-- `vacancies collect --source rabota --query "редактор копирайтер" --days 7`
+- `vacancies collect --source rabota --text "редактор копирайтер" --days 7`
   пишет карточки в базу, `vacancies show` показывает описание и навыки.
