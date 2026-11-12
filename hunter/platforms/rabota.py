@@ -225,11 +225,19 @@ class Rabota:
         row = card_row(vacancy)
         remote = (vacancy.get("operating_schedule") or {}).get("id") == REMOTE_SCHEDULE_ID
         row["work_formats"] = json.dumps(["REMOTE"] if remote else [])
+        description = html_to_markdown(vacancy.get("description") or "")
+        if not description.strip():
+            # Пустой текст записался бы как скачанная деталь, и вакансию
+            # больше никто не перекачает.
+            raise ParseError(
+                f"в состоянии rabota нет текста вакансии {row['external_id']} — "
+                "сайт сменил формат"
+            )
         return Detail(
             source="rabota",
             external_id=row["external_id"],
             row=row,
-            description=html_to_markdown(vacancy.get("description") or ""),
+            description=description,
             key_skills=[str(skill["name"]) for skill in vacancy.get("skills") or []],
             status="active" if vacancy.get("status") == "published" else "archived",
             raw=vacancy,

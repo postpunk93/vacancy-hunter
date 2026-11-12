@@ -163,6 +163,17 @@ def test_vacancy_page_without_vacancy_node_is_a_parse_error():
         get("rabota").parse_detail(_nuxt_page({"state": {"rabota": {"vacancy": {}}}}))
 
 
+def test_vacancy_page_without_description_is_a_parse_error():
+    """Пустой текст записался бы как скачанная деталь — вакансию больше
+    никто не перекачает, а владельцу покажут вакансию без текста."""
+    page = _nuxt_page({"state": {"rabota": {"vacancy": {"vacancy": {
+        "id": 1, "title": "Т", "status": "published", "description": "",
+        "company": {"name": "К"}, "places": [], "skills": []}}}}})
+
+    with pytest.raises(ParseError, match="текст"):
+        get("rabota").parse_detail(page)
+
+
 def test_ref_forms_are_understood():
     platform = get("rabota")
 
