@@ -93,6 +93,20 @@ def test_captcha_page_counts_as_block(store):
     assert "не скачано 2" in warnings[0]
 
 
+def test_block_warning_names_the_blocked_platform(store):
+    vacancy = make_vacancy(source="rabota", vacancy_id="54461414",
+                           url="https://www.rabota.ru/vacancy/54461414/")
+
+    def fetch_page(url):
+        return "<html>Подтвердите, что вы не робот</html>"
+
+    texts, warnings = fetch_texts([vacancy], fetch_page=fetch_page, store=store,
+                                  pause=lambda s: None)
+
+    assert texts == {}
+    assert warnings[0].startswith("rabota заблокировал"), "площадка в предупреждении — та, что отказала"
+
+
 def test_single_failures_are_skipped(store):
     pages = Pages(errors={1: NotFound("404"), 2: FetchError("timeout")})
     texts, warnings = fetch_texts(vacancies(1, 2, 3), fetch_page=pages, store=store, pause=lambda s: None)

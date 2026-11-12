@@ -32,6 +32,7 @@ def fetch_texts(
     texts: dict[str, FullText] = {}
     requested = False
     blocked: str | None = None
+    blocked_source: str | None = None
     not_fetched = 0
     for vacancy in vacancies:
         cached = store.get_text(vacancy.key)
@@ -52,6 +53,7 @@ def fetch_texts(
         except (Blocked, Captcha) as exc:
             log.error("Скачивание текстов остановлено: %s", exc)
             blocked = str(exc)
+            blocked_source = vacancy.source
             not_fetched += 1
             continue
         except (FetchError, ParseError, KeyError, TypeError, ValueError) as exc:
@@ -64,6 +66,6 @@ def fetch_texts(
     if blocked is None:
         return texts, []
     return texts, [
-        f"hh заблокировал скачивание текстов вакансий: {blocked}; "
+        f"{blocked_source} заблокировал скачивание текстов вакансий: {blocked}; "
         f"не скачано {not_fetched}, оценка по карточке"
     ]
