@@ -58,7 +58,7 @@ _EMPLOYMENT = {
 }
 
 # Занятость в справочнике страницы вакансии — слаг, а JSON-LD отдаёт код hh.
-_WORK_TYPE = {"full-time": "FULL", "part-time": "PART"}
+_WORK_TYPE = {"full-time": "FULL", "part-time": "PART", "half-day": "PART"}
 
 _VACANCY_PATH = re.compile(r"/vakansii/(?:[^/]*-)?(\d+)\.html")
 _JOB_POSTING = re.compile(
@@ -70,7 +70,8 @@ _JOB_POSTING = re.compile(
 def _employment(value: object) -> str | None:
     """employmentType → код hh. Схема schema.org разрешает список, площадка им пользуется."""
     if isinstance(value, list):
-        known = [_EMPLOYMENT[code] for code in value if code in _EMPLOYMENT]
+        known = [_EMPLOYMENT[code] for code in value
+                 if isinstance(code, str) and code in _EMPLOYMENT]
         if known:
             return known[0]
         first = next((code for code in value if isinstance(code, str)), None)
@@ -94,6 +95,14 @@ def _state(page_html: str) -> dict:
     if not isinstance(state, dict):
         raise ParseError("APP_STATE разобрался не в словарь — сайт сменил формат")
     return state
+
+
+def _state_or_none(page_html: str) -> dict | None:
+    """Состояние, если оно есть и читается: страница с JobPosting живёт и без него."""
+    try:
+        return _state(page_html)
+    except (Captcha, ParseError):
+        return None
 
 
 def _entity(state: dict, kind: str, entity_id: str, owner: str = "") -> dict:
@@ -255,7 +264,8 @@ def _detail_vacancy_id(state: dict) -> str:
     page_type = page_info.get("pageType")
     if page_type != _DETAIL_PAGE:
         raise ParseError(
-            f"страница superjob отдала не вакансию ({page_type}) — сайт сменил формат"
+            f"страница superjob не вакансия ({page_type or 'нет типа'}) — "
+            "возможно, редирект на выдачу"
         )
     vacancy_id = (page_info.get("routeParams") or {}).get("vacancyId")
     if not vacancy_id:
@@ -264,12 +274,27 @@ def _detail_vacancy_id(state: dict) -> str:
 
 
 def _detail_status(state: dict, vacancy_id: str) -> str:
-    """Снята с сайта или жива. Нет сведений о статусе — считаем живой."""
-    info = ((state.get("entities") or {}).get("vacancyStatusesInfo") or {}).get(vacancy_id) or {}
+    """Снята с сайта или жива. Сведений о статусе нет — не гадаем, а честно падаем."""
+    info = ((state.get("entities") or {}).get("vacancyStatusesInfo") or {}).get(vacancy_id)
+    if info is None:
+        raise ParseError(
+            f"в APP_STATE нет статуса вакансии {vacancy_id} — сайт сменил формат"
+        )
     attributes = info.get("attributes") or {}
     if attributes.get("isArchive") or attributes.get("isClosed"):
         return "archived"
     return "active"
+
+
+def _state_status(state: dict | None) -> str:
+    """Статус со страницы, если состояние есть. Страница с JobPosting живёт и без него."""
+    if state is None:
+        return "active"
+    page_info = state.get("pageInfo") or {}
+    vacancy_id = (page_info.get("routeParams") or {}).get("vacancyId")
+    if page_info.get("pageType") != _DETAIL_PAGE or not vacancy_id:
+        return "active"
+    return _detail_status(state, str(vacancy_id))
 
 
 def _detail_entity(state: dict, vacancy_id: str) -> dict:
@@ -279,13 +304,16 @@ def _detail_entity(state: dict, vacancy_id: str) -> dict:
     return _entity(state, "vacancyDetailInfo", link["id"], vacancy_id)
 
 
-def _detail_text(attributes: dict) -> str:
-    for key in ("fullText", "fullTextPlain"):
-        text = attributes.get(key)
-        if text and text.strip():
-            return text
+def _detail_markdown(attributes: dict) -> str:
+    """Текст вакансии в markdown. fullText — HTML, остальные поля — плоский текст."""
+    html = attributes.get("fullText")
+    if html and html.strip():
+        return html_to_markdown(html)
+    plain = attributes.get("fullTextPlain")
+    if plain and plain.strip():
+        return plain.strip()
     parts = [attributes.get("duties"), attributes.get("requirements")]
-    return "\n\n".join(part for part in parts if part)
+    return "\n\n".join(part.strip() for part in parts if part and part.strip())
 
 
 def _detail_skills(state: dict, vacancy_id: str) -> list[str]:
@@ -307,6 +335,13 @@ def _detail_from_state(state: dict, vacancy_id: str, status: str) -> Detail:
     card = _card(state, vacancy_id)
     attributes = _detail_entity(state, vacancy_id).get("attributes") or {}
     main = _entity(state, "vacancyMainInfo", vacancy_id, vacancy_id).get("attributes") or {}
+    description = _detail_markdown(attributes)
+    if not description:
+        # Пустой текст записался бы как скачанная деталь, и вакансию больше
+        # никто не перекачает.
+        raise ParseError(
+            f"в APP_STATE вакансии {vacancy_id} нет текста — сайт сменил формат"
+        )
     row = dict(card.row)
     # Даты публикации в карточке выдачи нет — берём из состояния.
     row["published_at"] = main.get("publishedAt")
@@ -314,7 +349,7 @@ def _detail_from_state(state: dict, vacancy_id: str, status: str) -> Detail:
         source="superjob",
         external_id=str(vacancy_id),
         row=row,
-        description=html_to_markdown(_detail_text(attributes)),
+        description=description,
         key_skills=_detail_skills(state, vacancy_id),
         status=status,
         raw=attributes,
@@ -371,12 +406,15 @@ class Superjob:
         return VACANCY_URL.format(id=external_id)
 
     def parse_detail(self, page_html: str) -> Detail:
-        state = _state(page_html)
-        vacancy_id = _detail_vacancy_id(state)
-        status = _detail_status(state, vacancy_id)
         posting = _find_job_posting(page_html)
         if posting is None:
-            return _detail_from_state(state, vacancy_id, status)
+            state = _state(page_html)
+            vacancy_id = _detail_vacancy_id(state)
+            return _detail_from_state(state, vacancy_id,
+                                      _detail_status(state, vacancy_id))
+        # Страницы с JobPosting разбирались и до перехода на состояние:
+        # редирект без APP_STATE не должен выглядеть блокировкой.
+        status = _state_status(_state_or_none(page_html))
         url = posting.get("url") or ""
         external_id = self.parse_ref(url)
         if external_id is None:

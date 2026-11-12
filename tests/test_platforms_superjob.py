@@ -125,7 +125,7 @@ def test_detail_comes_from_jsonld():
 
 
 def test_detail_empty_state_is_a_parse_error():
-    with pytest.raises(ParseError, match="вакансию"):
+    with pytest.raises(ParseError, match="не вакансия"):
         get("superjob").parse_detail('<html><script>window.APP_STATE={}</script></html>')
 
 
@@ -226,8 +226,8 @@ def _vacancy_state(*, statuses=None, detail=None, route=True):
                 "workType": {"data": {"id": "w1"}},
                 "professionalSkills": {"data": [{"id": "p1"}, {"id": "p2"}]},
             }, "attributes": {
-                "fullText": "<p>Обязанности</p><ul><li>писать тексты</li></ul>",
-                "fullTextPlain": "Обязанности писать тексты",
+                "fullText": "<p>Полный текст</p>",
+                "fullTextPlain": "Краткий текст",
                 "isRemoteWork": True,
                 **(detail or {}),
             }}},
@@ -311,7 +311,7 @@ def test_archived_detail_without_jobposting_comes_from_state():
     assert detail.row["employment_form"] == "PART"
     assert json.loads(detail.row["work_formats"]) == ["REMOTE"]
     assert detail.key_skills == ["Редактура", "Python"]
-    assert "Обязанности" in detail.description and "<p>" not in detail.description
+    assert detail.description.strip() == "Полный текст"
 
 
 def test_closed_detail_is_archived_too():
@@ -325,19 +325,38 @@ def test_detail_falls_back_to_full_text_plain():
         _detail_html(_vacancy_state(detail={"fullText": ""}))
     )
 
-    assert detail.description.strip() == "Обязанности писать тексты"
+    assert detail.description.strip() == "Краткий текст"
 
 
 def test_detail_falls_back_to_duties_and_requirements():
     state = _vacancy_state(detail={
         "fullText": "", "fullTextPlain": "",
-        "duties": "<p>Писать тексты</p>", "requirements": "<p>Знать язык</p>",
+        "duties": "Писать тексты\n• Следить за стилем",
+        "requirements": "Знать язык",
     })
 
     detail = get("superjob").parse_detail(_detail_html(state))
 
-    assert "Писать тексты" in detail.description
-    assert "Знать язык" in detail.description
+    assert detail.description == "Писать тексты\n• Следить за стилем\n\nЗнать язык"
+
+
+def test_detail_without_any_text_is_a_parse_error():
+    """Пустой текст записался бы как скачанная деталь и больше не обновился."""
+    state = _vacancy_state(detail={
+        "fullText": "", "fullTextPlain": "", "duties": "", "requirements": "",
+    })
+
+    with pytest.raises(ParseError, match="текста"):
+        get("superjob").parse_detail(_detail_html(state))
+
+
+def test_detail_state_without_status_is_a_parse_error():
+    """Молчаливое «жива» перезаписало бы archived на active у всех строк."""
+    state = _vacancy_state()
+    del state["entities"]["vacancyStatusesInfo"]
+
+    with pytest.raises(ParseError, match="статус"):
+        get("superjob").parse_detail(_detail_html(state))
 
 
 def test_detail_state_without_route_vacancy_id_is_a_parse_error():
@@ -351,7 +370,7 @@ def test_detail_state_of_another_page_type_is_a_parse_error():
     state = _vacancy_state()
     state["pageInfo"]["pageType"] = "search-vacancy"
 
-    with pytest.raises(ParseError, match="вакансию"):
+    with pytest.raises(ParseError, match="не вакансия"):
         get("superjob").parse_detail(_detail_html(state))
 
 
@@ -361,3 +380,50 @@ def test_detail_state_without_vacancy_entities_is_a_parse_error():
 
     with pytest.raises(ParseError, match="сущности"):
         get("superjob").parse_detail(_detail_html(state))
+
+
+def test_detail_with_jobposting_takes_status_from_state():
+    state = _vacancy_state(statuses={"isArchive": True, "isClosed": False})
+
+    assert get("superjob").parse_detail(_detail_html(state, _posting())).status == "archived"
+
+
+def test_detail_with_jobposting_survives_without_state():
+    """Страница без APP_STATE не должна выглядеть капчей: это оборвало бы докачку."""
+    detail = get("superjob").parse_detail(_detail_html(posting=_posting()))
+
+    assert detail.status == "active"
+    assert detail.row["name"] == "Редактор"
+
+
+def test_card_employment_form_is_hh_code():
+    cards = _cards("superjob_search_sales.html")
+
+    assert cards[0].row["employment_form"] == "FULL"
+
+
+def test_detail_rows_have_the_same_keys_on_both_paths():
+    platform = get("superjob")
+    from_posting = platform.parse_detail(_detail_html(_vacancy_state(), _posting()))
+    from_state = platform.parse_detail(_detail_html(_vacancy_state()))
+
+    assert set(from_posting.row) == set(from_state.row)
+
+
+def test_archived_detail_is_written_to_the_base(tmp_path):
+    from hunter.corpus.collect import fetch_details
+    from hunter.corpus.store import Corpus
+
+    html = _detail_html(_vacancy_state(statuses={"isArchive": True}))
+
+    with Corpus.open(tmp_path / "db.sqlite", create=True) as corpus:
+        report = fetch_details(corpus, lambda url: html, [("superjob", "900001")])
+        assert report.fetched == ["superjob:900001"]
+
+        row = corpus.vacancy(corpus.find("superjob", "900001"))
+        assert row["status"] == "archived"
+        assert row["description"].strip() == "Полный текст"
+        assert json.loads(row["key_skills"]) == ["Редактура", "Python"]
+
+        again = fetch_details(corpus, lambda url: html, [("superjob", "900001")])
+        assert again.skipped == ["superjob:900001"], "скачанный текст не перекачиваем"
