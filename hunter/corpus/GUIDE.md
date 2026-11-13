@@ -1,4 +1,4 @@
-# Команды и база job-hunter
+# Команды и база vacancy-hunter
 
 Справочник для Claude и владельца. Как вести поиск по этапам — в `CLAUDE.md`
 и skills в `.claude/skills/`.

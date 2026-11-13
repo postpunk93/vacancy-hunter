@@ -1,4 +1,4 @@
-# job-hunter
+# vacancy-hunter
 
 Поиск работы на hh.ru, superjob.ru, rabota.ru и zarplata.ru — от первого
 разговора до тестового задания, целиком в диалоге с Claude Code. Владелец открывает Claude в папке проекта
