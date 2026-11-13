@@ -149,3 +149,8 @@ TG_CHAT_ID=ваш chat_id
 ```bash
 uv run pytest
 ```
+
+## Лицензия
+
+MIT — можно брать код, форкать и использовать как основу. Подробности в
+[LICENSE](LICENSE).
